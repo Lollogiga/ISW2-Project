@@ -4,7 +4,7 @@ import it.project.entities.Release;
 
 import it.project.entities.Ticket;
 import it.project.utils.Json;
-import it.project.utils.ReleaseTool;
+import it.project.utils.ReleaseUtils;
 import org.json.JSONObject;
 import org.json.JSONArray;
 import java.io.IOException;
@@ -77,8 +77,8 @@ public class JiraExtraction {
 
                 Ticket ticket = new Ticket(creationDate, resolutionDate, key);
                 ticket.setAffectedVersionsList(affectedVersions);
-                ticket.setOpeningVersion(ReleaseTool.fetchVersion(creationDate, releasesList));
-                ticket.setFixedVersion(ReleaseTool.fetchVersion(resolutionDate, releasesList));
+                ticket.setOpeningVersion(ReleaseUtils.fetchVersion(creationDate, releasesList));
+                ticket.setFixedVersion(ReleaseUtils.fetchVersion(resolutionDate, releasesList));
 
                 listOfTickets.add(ticket);
             }
