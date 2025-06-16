@@ -2,6 +2,8 @@ package it.project.utils;
 
 
 import it.project.entities.Release;
+import it.project.entities.JavaClass;
+import it.project.entities.JavaMethod;
 
 import java.io.File;
 import java.io.FileWriter;
@@ -95,6 +97,44 @@ public class FileCSVGenerator {
 
         } catch (IOException e) {
             Logger.getAnonymousLogger().log(Level.SEVERE, "An error occurred while generating release info", e);
+        } finally {
+            closeWriter(fileWriter);
+        }
+    }
+
+    public void csv_generateMethodList(List<Release> releases) {
+        FileWriter fileWriter = null;
+        String fileTitle = this.directoryPath + OTHERFILES + this.projName + "_MethodList.csv";
+
+        try {
+            fileWriter = new FileWriter(fileTitle);
+
+            // 1. Modifica l'intestazione per riflettere le due colonne
+            writeToFile(fileWriter, "Release,MethodFullName");
+
+            // Iteriamo su ogni release
+            for (Release release : releases) {
+                String releaseName = release.getName(); // Otteniamo il nome della release
+
+                // Per ogni release, iteriamo su ogni classe Java
+                for (JavaClass javaClass : release.getJavaClassList()) {
+                    // Per ogni classe, iteriamo su ogni metodo
+                    for (JavaMethod javaMethod : javaClass.getMethods()) {
+
+                        String methodIdentifier = javaClass.getPath() + "::" + javaMethod.getName();
+
+                        // 2. Creiamo la riga del CSV con entrambi i valori, separati da una virgola
+                        String csvLine = releaseName + "," + methodIdentifier;
+
+                        // Scriviamo la riga completa nel file
+                        writeToFile(fileWriter, csvLine);
+                    }
+                }
+            }
+            Logger.getAnonymousLogger().log(Level.INFO, "Generato file con elenco metodi per release: {0}", fileTitle);
+
+        } catch (IOException e) {
+            Logger.getAnonymousLogger().log(Level.SEVERE, "Errore durante la generazione della lista dei metodi per release", e);
         } finally {
             closeWriter(fileWriter);
         }

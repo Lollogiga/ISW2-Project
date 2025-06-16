@@ -1,5 +1,14 @@
 package it.project.controllers;
 
+import com.github.javaparser.ast.body.ConstructorDeclaration;
+import com.github.javaparser.ast.stmt.Statement;
+import com.github.javaparser.ast.expr.FieldAccessExpr;
+import com.github.javaparser.ast.expr.ThisExpr;
+import com.github.javaparser.ast.stmt.BlockStmt;
+import com.github.javaparser.ast.stmt.ExpressionStmt;
+import com.github.javaparser.ast.stmt.ReturnStmt;
+import com.github.javaparser.ast.expr.AssignExpr;
+import java.util.Optional;
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParseResult;
 import com.github.javaparser.ast.CompilationUnit;
@@ -106,6 +115,87 @@ public class GitExtraction {
         }
     }
 
+    private boolean isSimpleGetterOrSetter(MethodDeclaration method) {
+        // Un metodo senza corpo non è un getter/setter semplice (es. astratto)
+        Optional<BlockStmt> body = method.getBody();
+        if (body.isEmpty()) {
+            return false;
+        }
+
+        // Un getter/setter semplice ha esattamente una istruzione nel corpo
+        if (body.get().getStatements().size() != 1) {
+            return false;
+        }
+
+        String methodName = method.getNameAsString();
+
+        // Controllo per i GETTER (get... o is... per i booleani)
+        if ((methodName.startsWith("get") || methodName.startsWith("is")) && method.getParameters().isEmpty()) {
+            // L'unica istruzione deve essere un "return"
+            return body.get().getStatements().get(0) instanceof ReturnStmt;
+        }
+
+        // Controllo per i SETTER (set...)
+        if (methodName.startsWith("set") && method.getParameters().size() == 1) {
+            // L'unica istruzione deve essere un'espressione
+            if (!(body.get().getStatements().get(0) instanceof ExpressionStmt)) {
+                return false;
+            }
+            // E quell'espressione deve essere un'assegnazione
+            ExpressionStmt exprStmt = (ExpressionStmt) body.get().getStatements().get(0);
+            return exprStmt.getExpression() instanceof AssignExpr;
+        }
+
+        return false;
+    }
+
+    /**
+     * Controlla se un metodo è un boilerplate comune (toString, equals, hashCode).
+     */
+    private boolean isBoilerplateMethod(MethodDeclaration method) {
+        String name = method.getNameAsString();
+        // Controllo per toString()
+        if ("toString".equals(name) && method.getParameters().isEmpty()) return true;
+        // Controllo per hashCode()
+        if ("hashCode".equals(name) && method.getParameters().isEmpty()) return true;
+        // Controllo per equals(Object obj)
+        return "equals".equals(name) && method.getParameters().size() == 1 &&
+                method.getParameter(0).getType().asString().equals("Object");
+    }
+
+    /**
+     * Controlla se un metodo è un main eseguibile.
+     */
+    private boolean isMainMethod(MethodDeclaration method) {
+        if (!"main".equals(method.getNameAsString())) return false;
+        if (!method.isPublic() || !method.isStatic()) return false;
+        if (method.getParameters().size() != 1) return false;
+        return method.getParameter(0).getType().asString().equals("String[]");
+    }
+
+    /**
+     * Controlla se un costruttore è "semplice", cioè assegna solo parametri a campi.
+     */
+    private boolean isSimpleConstructor(ConstructorDeclaration constructor) {
+        if (constructor.getBody().getStatements().isEmpty()) {
+            return true; // Costruttore vuoto, es. default
+        }
+        for (Statement stmt : constructor.getBody().getStatements()) {
+            // Un costruttore semplice contiene solo assegnazioni del tipo "this.field = param;"
+            if (!(stmt instanceof ExpressionStmt)) return false;
+            ExpressionStmt exprStmt = (ExpressionStmt) stmt;
+            if (!(exprStmt.getExpression() instanceof AssignExpr)) return false;
+
+            AssignExpr assignExpr = (AssignExpr) exprStmt.getExpression();
+            if (!(assignExpr.getTarget() instanceof FieldAccessExpr)) return false;
+
+            FieldAccessExpr fieldAccess = (FieldAccessExpr) assignExpr.getTarget();
+            if (!(fieldAccess.getScope() instanceof ThisExpr)) return false;
+        }
+        return true;
+    }
+
+
     private void parseJavaFile(TreeWalk treeWalk, String path, Release release) throws IOException {
         ObjectId objectId = treeWalk.getObjectId(0);
         ObjectLoader loader = git.getRepository().open(objectId);
@@ -125,12 +215,19 @@ public class GitExtraction {
             JavaClass javaClass = new JavaClass(className, path);
 
             c.findAll(MethodDeclaration.class).forEach(m -> {
-                String methodName = m.getNameAsString();
-                String methodContent = m.toString();
+                if(m.getBody().isPresent() &&
+                        !isSimpleGetterOrSetter(m) &&
+                        !isBoilerplateMethod(m) &&
+                        !isMainMethod(m))
+                {
+                    String methodName = m.getNameAsString();
+                    String methodContent = m.toString();
 
-                // Creiamo il JavaMethod passando la release corrente
-                JavaMethod javaMethod = new JavaMethod(methodName, methodContent, release);
-                javaClass.addMethod(javaMethod);
+                    // Creiamo il JavaMethod passando la release corrente
+                    JavaMethod javaMethod = new JavaMethod(methodName, methodContent, release);
+                    javaClass.addMethod(javaMethod);
+                }
+
             });
 
             if (!javaClass.getMethods().isEmpty()) {

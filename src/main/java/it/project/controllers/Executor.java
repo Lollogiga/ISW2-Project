@@ -60,5 +60,8 @@ public class Executor {
             Logger.getAnonymousLogger().log(Level.SEVERE, "Fatal error while parsing Git repository. Unable to proceed.", e);
         }
 
+        //Export methodList in a csvFile:
+        csv.csv_generateMethodList(releaseList);
+
     }
 }
