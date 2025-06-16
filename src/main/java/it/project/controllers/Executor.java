@@ -4,6 +4,8 @@ import it.project.entities.Release;
 import it.project.entities.Ticket;
 import it.project.utils.FileCSVGenerator;
 import it.project.utils.TicketUtils;
+import org.eclipse.jgit.api.errors.GitAPIException;
+import org.eclipse.jgit.revwalk.RevCommit;
 
 import java.io.IOException;
 import java.util.Comparator;
@@ -34,6 +36,24 @@ public class Executor {
         //Order data by resolution date:
         ticketList.sort(Comparator.comparing(Ticket::getResolutionDate));
 
+        //Compute proportion for have IV:
+        Proportion.calculateProportion(ticketList, releaseList);
+        Logger.getAnonymousLogger() .log(Level.INFO, "Data extraction: Proportion computed!");
+        TicketUtils.fixInconsistentTickets(ticketList, releaseList);
+
+        //Extraction from git:
+        GitExtraction gitExtraction = new GitExtraction();
+        try {
+            gitExtraction.associateCommitsToReleases(releaseList);
+            // Remove releases without commit
+            long initialSize = releaseList.size();
+            releaseList.removeIf(release -> release.getCommitList().isEmpty());
+            long finalSize = releaseList.size();
+
+            Logger.getAnonymousLogger().log(Level.INFO, "Filtraggio release: rimosse {0} release senza commit. Restanti: {1}", new Object[]{initialSize - finalSize, finalSize});
+        } catch (GitAPIException e) {
+            Logger.getAnonymousLogger().log(Level.SEVERE, "Errore fatale durante l'analisi del repository Git. Impossibile procedere.", e);
+        }
 
     }
 }

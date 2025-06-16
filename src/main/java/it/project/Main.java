@@ -11,7 +11,7 @@ public class Main {
     public static void main(String[] args) {
         Properties prop = new Properties();
 
-        try (InputStream input = new FileInputStream("src/main/java/it/project/utils/configuration.properties")) {
+        try (InputStream input = new FileInputStream("src/main/resources/configuration.properties")) {
             prop.load(input);
         } catch (IOException e) {
             Logger.getAnonymousLogger().log(Level.INFO, String.format("File not found, %s", e));
