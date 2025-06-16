@@ -1,44 +1,29 @@
 package it.project.entities;
 
-import it.project.entities.JavaMethod;
-
+import java.util.ArrayList;
 import java.util.List;
 
 public class JavaClass {
     private final String name;
-    private final String path; // Percorso del file
-    private String content; // Contenuto del file in una specifica release
-    private List<JavaMethod> methods;
+    private final String path;
+    private final List<JavaMethod> methods;
+    private int lcom; // <-- LCOM va qui!
 
     public JavaClass(String name, String path) {
         this.name = name;
         this.path = path;
+        this.methods = new ArrayList<>();
+        this.lcom = 0; // Valore di default
     }
 
-
-    public String getName() {
-        return name;
+    public void addMethod(JavaMethod method) {
+        this.methods.add(method);
     }
 
-    public String getPath() {
-        return path;
-    }
-
-    public String getContent() {
-        return content;
-    }
-
-    public void setContent(String content) {
-        this.content = content;
-    }
-
-    // Getters e Setters
-    public List<JavaMethod> getMethods() {
-        return methods;
-    }
-
-    public void setMethods(List<JavaMethod> methods) {
-        this.methods = methods;
-    }
-
+    // --- Getters e Setters ---
+    public String getName() { return name; }
+    public String getPath() { return path; }
+    public List<JavaMethod> getMethods() { return methods; }
+    public int getLcom() { return lcom; }
+    public void setLcom(int lcom) { this.lcom = lcom; }
 }

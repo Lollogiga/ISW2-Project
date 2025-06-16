@@ -1,110 +1,57 @@
 package it.project.entities;
 
+
 public class JavaMethod {
     private final String name;
-    private final String className;
-    private final int releaseIndex;
+    private final String content;
+    private final Release release; // Link alla release di appartenenza
 
-    // Metriche calcolate
+    // Features
     private int loc;
     private int cyclomaticComplexity;
-    private int lcom; // Lack of Cohesion in Methods (spesso calcolata a livello di classe)
     private int churn;
     private int locAdded;
     private double newcomerRisk;
-    private int auth; // Numero di autori
+    private int n_auth;
     private double weekendCommitRatio;
     private boolean isBuggy;
 
-    public JavaMethod(String name, String className, int releaseIndex) {
+    public JavaMethod(String name, String content, Release release) {
         this.name = name;
-        this.className = className;
-        this.releaseIndex = releaseIndex;
-        this.isBuggy = false; // Default a non buggy
+        this.content = content;
+        this.release = release;
+
+        // Inizializziamo i valori di default
+        this.isBuggy = false; // Un metodo è "non buggy" finché non si prova il contrario
+        this.loc = 0;
+        this.cyclomaticComplexity = 0;
+        this.churn = 0;
+        this.locAdded = 0;
+        this.newcomerRisk = 0.0;
+        this.n_auth = 0;
+        this.weekendCommitRatio = 0.0;
     }
 
-    public String getName() {
-        return name;
-    }
+    // --- GETTERS ---
+    public String getName() { return name; }
+    public String getContent() { return content; }
+    public Release getRelease() { return release; }
+    public int getLoc() { return loc; }
+    public int getCyclomaticComplexity() { return cyclomaticComplexity; }
+    public int getChurn() { return churn; }
+    public int getLocAdded() { return locAdded; }
+    public double getNewcomerRisk() { return newcomerRisk; }
+    public int getN_auth() { return n_auth; }
+    public double getWeekendCommitRatio() { return weekendCommitRatio; }
+    public boolean isBuggy() { return isBuggy; }
 
-    public String getClassName() {
-        return className;
-    }
-
-    public int getReleaseIndex() {
-        return releaseIndex;
-    }
-
-    public int getLoc() {
-        return loc;
-    }
-
-    public void setLoc(int loc) {
-        this.loc = loc;
-    }
-
-    public int getCyclomaticComplexity() {
-        return cyclomaticComplexity;
-    }
-
-    public void setCyclomaticComplexity(int cyclomaticComplexity) {
-        this.cyclomaticComplexity = cyclomaticComplexity;
-    }
-
-    public int getLcom() {
-        return lcom;
-    }
-
-    public void setLcom(int lcom) {
-        this.lcom = lcom;
-    }
-
-    public int getChurn() {
-        return churn;
-    }
-
-    public void setChurn(int churn) {
-        this.churn = churn;
-    }
-
-    public int getLocAdded() {
-        return locAdded;
-    }
-
-    public void setLocAdded(int locAdded) {
-        this.locAdded = locAdded;
-    }
-
-    public double getNewcomerRisk() {
-        return newcomerRisk;
-    }
-
-    public void setNewcomerRisk(double newcomerRisk) {
-        this.newcomerRisk = newcomerRisk;
-    }
-
-    public int getAuth() {
-        return auth;
-    }
-
-    public void setAuth(int auth) {
-        this.auth = auth;
-    }
-
-    public double getWeekendCommitRatio() {
-        return weekendCommitRatio;
-    }
-
-    public void setWeekendCommitRatio(double weekendCommitRatio) {
-        this.weekendCommitRatio = weekendCommitRatio;
-    }
-
-    public String isBuggy() {
-        if(isBuggy)
-            return "Yes";
-        else
-            return "No";
-    }
-
-
+    // --- SETTERS ---
+    public void setLoc(int loc) { this.loc = loc; }
+    public void setCyclomaticComplexity(int cyclomaticComplexity) { this.cyclomaticComplexity = cyclomaticComplexity; }
+    public void setChurn(int churn) { this.churn = churn; }
+    public void setLocAdded(int locAdded) { this.locAdded = locAdded; }
+    public void setNewcomerRisk(double newcomerRisk) { this.newcomerRisk = newcomerRisk; }
+    public void setN_auth(int n_auth) { this.n_auth = n_auth; }
+    public void setWeekendCommitRatio(double weekendCommitRatio) { this.weekendCommitRatio = weekendCommitRatio; }
+    public void setBuggy(boolean buggy) { isBuggy = buggy; }
 }

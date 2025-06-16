@@ -5,7 +5,6 @@ import it.project.entities.Ticket;
 import it.project.utils.FileCSVGenerator;
 import it.project.utils.TicketUtils;
 import org.eclipse.jgit.api.errors.GitAPIException;
-import org.eclipse.jgit.revwalk.RevCommit;
 
 import java.io.IOException;
 import java.util.Comparator;
@@ -50,9 +49,15 @@ public class Executor {
             releaseList.removeIf(release -> release.getCommitList().isEmpty());
             long finalSize = releaseList.size();
 
-            Logger.getAnonymousLogger().log(Level.INFO, "Filtraggio release: rimosse {0} release senza commit. Restanti: {1}", new Object[]{initialSize - finalSize, finalSize});
-        } catch (GitAPIException e) {
-            Logger.getAnonymousLogger().log(Level.SEVERE, "Errore fatale durante l'analisi del repository Git. Impossibile procedere.", e);
+            Logger.getAnonymousLogger().log(Level.INFO, "Filtering release: removed {0} uncommitted release. Remaining: {1}", new Object[]{initialSize - finalSize, finalSize});
+
+            Logger.getAnonymousLogger().log((Level.INFO), "Data extraction: Extraction class and method");
+            for (Release release : releaseList) {
+                gitExtraction.analyzeReleaseCode(release);
+                Logger.getAnonymousLogger().log(Level.INFO, "Release {0}: founded {1} class with method", new Object[]{release.getName(), release.getJavaClassList().size()});
+            }
+        } catch (GitAPIException | IOException e) {
+            Logger.getAnonymousLogger().log(Level.SEVERE, "Fatal error while parsing Git repository. Unable to proceed.", e);
         }
 
     }
