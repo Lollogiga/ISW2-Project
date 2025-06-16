@@ -139,4 +139,57 @@ public class FileCSVGenerator {
             closeWriter(fileWriter);
         }
     }
+
+    public void generateDataset(List<Release> releases) {
+        FileWriter fileWriter = null;
+        String fileTitle = this.directoryPath + OTHERFILES + this.projName + "_dataset.csv";
+
+        try {
+            fileWriter = new FileWriter(fileTitle);
+
+            // 1. Scrivi l'intestazione (header) del CSV con tutte le colonne
+            String header = "MethodName,Release,LOC,Parameters_Count,Fan_Out,Cyclomatic_Complexity,LCOM,Churn,LOC_Added,Newcomer_Risk,n_Auth,Weekend_Commit_Ratio,isBuggy";
+            writeToFile(fileWriter, header);
+
+            Logger.getAnonymousLogger().log(Level.INFO, "Generazione dataset in corso... {0}", fileTitle);
+
+            // 2. Itera su ogni release, classe e metodo per creare le righe del dataset
+            for (Release release : releases) {
+                for (JavaClass javaClass : release.getJavaClassList()) {
+                    for (JavaMethod javaMethod : javaClass.getMethods()) {
+                        // Costruiamo l'identificatore del metodo
+                        String methodName = javaClass.getPath() + "::" + javaMethod.getName();
+
+                        // Mettiamo tutti i valori in un array di stringhe per una facile unione
+                        String[] values = {
+                                methodName,
+                                release.getName(),
+                                String.valueOf(javaMethod.getLoc()),
+                                String.valueOf(javaMethod.getParametersCount()),
+                                String.valueOf(javaMethod.getFanOut()),
+                                String.valueOf(javaMethod.getCyclomaticComplexity()),
+                                String.valueOf(javaClass.getLcom()), // LCOM è a livello di classe
+                                String.valueOf(javaMethod.getChurn()),
+                                String.valueOf(javaMethod.getLocAdded()),
+                                String.valueOf(javaMethod.getNewcomerRisk()),
+                                String.valueOf(javaMethod.getnAuth()),
+                                String.valueOf(javaMethod.getWeekendCommitRatio()),
+                                javaMethod.isBuggy()
+                        };
+
+                        // Uniamo i valori con una virgola per creare la riga CSV
+                        String csvLine = String.join(",", values);
+                        writeToFile(fileWriter, csvLine);
+                    }
+                }
+            }
+            Logger.getAnonymousLogger().log(Level.INFO, "Generazione dataset completata.");
+
+        } catch (IOException e) {
+            Logger.getAnonymousLogger().log(Level.SEVERE, "Errore durante la generazione del dataset CSV", e);
+        } finally {
+            closeWriter(fileWriter);
+        }
+    }
+
 }

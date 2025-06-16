@@ -7,7 +7,7 @@ public class JavaClass {
     private final String name;
     private final String path;
     private final List<JavaMethod> methods;
-    private int lcom; // <-- LCOM va qui!
+    private int lcom;
 
     public JavaClass(String name, String path) {
         this.name = name;

@@ -1,14 +1,24 @@
 package it.project.controllers;
 
+import com.github.javaparser.ast.expr.MethodCallExpr;
+import com.github.javaparser.ast.expr.BinaryExpr;
+import com.github.javaparser.ast.expr.ConditionalExpr;
+import com.github.javaparser.ast.stmt.*;
+import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
+
+import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import com.github.javaparser.ast.body.FieldDeclaration;
+import com.github.javaparser.ast.expr.FieldAccessExpr;
+import java.util.stream.Collectors;
 import com.github.javaparser.ast.body.ConstructorDeclaration;
 import com.github.javaparser.ast.stmt.Statement;
-import com.github.javaparser.ast.expr.FieldAccessExpr;
 import com.github.javaparser.ast.expr.ThisExpr;
 import com.github.javaparser.ast.stmt.BlockStmt;
 import com.github.javaparser.ast.stmt.ExpressionStmt;
 import com.github.javaparser.ast.stmt.ReturnStmt;
 import com.github.javaparser.ast.expr.AssignExpr;
-import java.util.Optional;
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParseResult;
 import com.github.javaparser.ast.CompilationUnit;
@@ -30,9 +40,6 @@ import java.io.IOException;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -214,17 +221,39 @@ public class GitExtraction {
             String className = c.getFullyQualifiedName().orElse(c.getNameAsString());
             JavaClass javaClass = new JavaClass(className, path);
 
+            javaClass.setLcom(calculateLCOM4(c));
+
             c.findAll(MethodDeclaration.class).forEach(m -> {
                 if(m.getBody().isPresent() &&
                         !isSimpleGetterOrSetter(m) &&
                         !isBoilerplateMethod(m) &&
                         !isMainMethod(m))
                 {
+
                     String methodName = m.getNameAsString();
                     String methodContent = m.toString();
 
+                    int startLine = m.getBegin().map(p -> p.line).orElse(-1);
+                    int endLine = m.getEnd().map(p -> p.line).orElse(-1);
                     // Creiamo il JavaMethod passando la release corrente
-                    JavaMethod javaMethod = new JavaMethod(methodName, methodContent, release);
+                    JavaMethod javaMethod = new JavaMethod(methodName, methodContent, release, startLine, endLine);
+
+                    //LOC:
+                    if(startLine != -1){
+                        javaMethod.setLoc(endLine-startLine+1);
+                    }
+
+                    //Parameters count:
+                    javaMethod.setParametersCount(m.getParameters().size());
+
+                    //FanOut:
+                    Set<String> calledMethods = new HashSet<>();
+                    m.findAll(MethodCallExpr.class).forEach(call->calledMethods.add(call.getNameAsString()));
+                    javaMethod.setFanOut(calledMethods.size());
+
+                    //Cyclomatic Complexity:
+                    javaMethod.setCyclomaticComplexity(calculateCyclomaticComplexity(m));
+
                     javaClass.addMethod(javaMethod);
                 }
 
@@ -234,5 +263,137 @@ public class GitExtraction {
                 release.getJavaClassList().add(javaClass);
             }
         });
+    }
+
+    private int calculateLCOM4(ClassOrInterfaceDeclaration c) {
+        List<MethodDeclaration> methods = c.getMethods();
+        List<FieldDeclaration> fields = c.getFields();
+
+        // Se non ci sono metodi o campi, la coesione non è applicabile o è massima.
+        if (methods.size() <= 1 || fields.isEmpty()) {
+            return 1;
+        }
+
+        // Mappa per tenere traccia di quali campi sono usati da quale metodo
+        Map<MethodDeclaration, Set<String>> methodFieldUsage = new HashMap<>();
+        List<String> fieldNames = fields.stream()
+                .flatMap(f -> f.getVariables().stream())
+                .map(v -> v.getNameAsString())
+                .collect(Collectors.toList());
+
+        for (MethodDeclaration method : methods) {
+            Set<String> usedFields = new HashSet<>();
+            // Trova tutti gli accessi ai campi all'interno del metodo
+            method.findAll(FieldAccessExpr.class).forEach(fa -> {
+                if (fieldNames.contains(fa.getNameAsString())) {
+                    usedFields.add(fa.getNameAsString());
+                }
+            });
+            methodFieldUsage.put(method, usedFields);
+        }
+
+        // Costruisci il grafo di adiacenza
+        Map<MethodDeclaration, List<MethodDeclaration>> adjList = new HashMap<>();
+        for (MethodDeclaration m : methods) adjList.put(m, new ArrayList<>());
+
+        for (int i = 0; i < methods.size(); i++) {
+            for (int j = i + 1; j < methods.size(); j++) {
+                MethodDeclaration m1 = methods.get(i);
+                MethodDeclaration m2 = methods.get(j);
+
+                Set<String> fields1 = methodFieldUsage.get(m1);
+                Set<String> fields2 = methodFieldUsage.get(m2);
+
+                // Se i metodi condividono almeno un campo, aggiungi un arco
+                if (!Collections.disjoint(fields1, fields2)) {
+                    adjList.get(m1).add(m2);
+                    adjList.get(m2).add(m1);
+                }
+            }
+        }
+
+        // Calcola le componenti connesse usando DFS (Depth-First Search)
+        Set<MethodDeclaration> visited = new HashSet<>();
+        int components = 0;
+        for (MethodDeclaration method : methods) {
+            if (!visited.contains(method)) {
+                dfs(method, adjList, visited);
+                components++;
+            }
+        }
+        return components;
+    }
+
+    // Helper DFS per il traversal del grafo
+    private void dfs(MethodDeclaration node, Map<MethodDeclaration, List<MethodDeclaration>> adjList, Set<MethodDeclaration> visited) {
+        visited.add(node);
+        for (MethodDeclaration neighbor : adjList.get(node)) {
+            if (!visited.contains(neighbor)) {
+                dfs(neighbor, adjList, visited);
+            }
+        }
+    }
+    private int calculateCyclomaticComplexity(MethodDeclaration md) {
+        // La complessità parte sempre da 1
+        AtomicInteger complexity = new AtomicInteger(1);
+
+        // Crea un'istanza del visitor
+        CyclomaticComplexityVisitor visitor = new CyclomaticComplexityVisitor();
+
+        // Fai partire la visita dall'inizio del metodo, passando il contatore
+        visitor.visit(md, complexity);
+
+        return complexity.get();
+    }
+
+    private static class CyclomaticComplexityVisitor extends VoidVisitorAdapter<AtomicInteger> {
+
+        @Override
+        public void visit(IfStmt n, AtomicInteger complexity) {
+            super.visit(n, complexity);
+            complexity.incrementAndGet();
+        }
+
+        @Override
+        public void visit(ForStmt n, AtomicInteger complexity) {
+            super.visit(n, complexity);
+            complexity.incrementAndGet();
+        }
+
+        @Override
+        public void visit(WhileStmt n, AtomicInteger complexity) {
+            super.visit(n, complexity);
+            complexity.incrementAndGet();
+        }
+
+        @Override
+        public void visit(DoStmt n, AtomicInteger complexity) {
+            super.visit(n, complexity);
+            complexity.incrementAndGet();
+        }
+
+        @Override
+        public void visit(SwitchEntry n, AtomicInteger complexity) {
+            super.visit(n, complexity);
+            // Incrementa solo per i case con codice, non per 'default' vuoto
+            if (n.getStatements().isNonEmpty()) {
+                complexity.incrementAndGet();
+            }
+        }
+
+        @Override
+        public void visit(ConditionalExpr n, AtomicInteger complexity) {
+            super.visit(n, complexity);
+            complexity.incrementAndGet(); // Per l'operatore ternario (cond ? a : b)
+        }
+
+        @Override
+        public void visit(BinaryExpr n, AtomicInteger complexity) {
+            super.visit(n, complexity);
+            // Incrementa per ogni operatore logico && o ||
+            if (n.getOperator() == BinaryExpr.Operator.AND || n.getOperator() == BinaryExpr.Operator.OR) {
+                complexity.incrementAndGet();
+            }
+        }
     }
 }

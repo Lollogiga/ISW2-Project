@@ -4,6 +4,7 @@ import it.project.entities.Release;
 import it.project.entities.Ticket;
 import it.project.utils.FileCSVGenerator;
 import it.project.utils.TicketUtils;
+import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.errors.GitAPIException;
 
 import java.io.IOException;
@@ -23,13 +24,13 @@ public class Executor {
 
 
         List<Release> releaseList = jira.getReleaseInfo();
-        Logger.getAnonymousLogger() .log(Level.INFO, "Data extraction: Releases List");
+        Logger.getAnonymousLogger().log(Level.INFO, "Data extraction: Releases List");
 
         //Generiamo il file csv relativo alle release estratte da jira
         csv.generateReleaseInfo(releaseList);
 
         List<Ticket> ticketList = jira.fetchTickets(releaseList);
-        Logger.getAnonymousLogger() .log(Level.INFO, "Data extraction: Tickets List");
+        Logger.getAnonymousLogger().log(Level.INFO, "Data extraction: Tickets List");
         //Remove all ticket not reliable
         TicketUtils.fixInconsistentTickets(ticketList, releaseList);
         //Order data by resolution date:
@@ -37,7 +38,7 @@ public class Executor {
 
         //Compute proportion for have IV:
         Proportion.calculateProportion(ticketList, releaseList);
-        Logger.getAnonymousLogger() .log(Level.INFO, "Data extraction: Proportion computed!");
+        Logger.getAnonymousLogger().log(Level.INFO, "Data extraction: Proportion computed!");
         TicketUtils.fixInconsistentTickets(ticketList, releaseList);
 
         //Extraction from git:
@@ -59,9 +60,20 @@ public class Executor {
         } catch (GitAPIException | IOException e) {
             Logger.getAnonymousLogger().log(Level.SEVERE, "Fatal error while parsing Git repository. Unable to proceed.", e);
         }
+        try {
+            Git gitInstance = it.project.utils.RepoFactory.getGit();
+            MetricsCalculator metricsCalculator = new MetricsCalculator(gitInstance);
+            metricsCalculator.calculateHistoricalMetrics(releaseList);
+            Logger.getAnonymousLogger().log(Level.INFO, "Calcolo metriche storiche completato.");
+        } catch (IOException e) {
+            Logger.getAnonymousLogger().log(Level.SEVERE, "Errore durante il calcolo delle metriche storiche", e);
+        }
 
         //Export methodList in a csvFile:
         csv.csv_generateMethodList(releaseList);
+
+        //Generate Dataset:
+        csv.generateDataset(releaseList);
 
     }
 }
