@@ -50,6 +50,7 @@ public class Executor {
             Logger.getAnonymousLogger().log(Level.SEVERE, "GitExtraction Error", e);
         }
 
+
         // Remove releases without commit
         long initialSize = releaseList.size();
         releaseList.removeIf(release -> release.getCommitList().isEmpty());

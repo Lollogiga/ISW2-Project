@@ -12,9 +12,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.expr.FieldAccessExpr;
 import java.util.stream.Collectors;
-import com.github.javaparser.ast.body.ConstructorDeclaration;
-import com.github.javaparser.ast.stmt.Statement;
-import com.github.javaparser.ast.expr.ThisExpr;
 import com.github.javaparser.ast.stmt.BlockStmt;
 import com.github.javaparser.ast.stmt.ExpressionStmt;
 import com.github.javaparser.ast.stmt.ReturnStmt;
@@ -59,45 +56,39 @@ public class GitExtraction {
     public void associateCommitsToReleases(List<Release> releases) throws GitAPIException, IOException {
         Logger.getAnonymousLogger().log(Level.INFO, "Data Extraction: Github extraction started");
 
-        // Recupera tutti i commit dal repository una sola volta per efficienza
         List<RevCommit> allCommits = new ArrayList<>();
         git.log().all().call().forEach(allCommits::add);
-        // Ordina i commit per data, dal più vecchio al più recente
         allCommits.sort(Comparator.comparingInt(RevCommit::getCommitTime));
 
-        LocalDateTime previousReleaseDate = null; // Per la prima release, non c'è una data precedente
+        LocalDateTime previousReleaseDate = null;
 
         for (Release release : releases) {
-            final LocalDateTime currentReleaseDate = release.getDate();
+            LocalDateTime currentReleaseDate = release.getDate();
 
             for (RevCommit commit : allCommits) {
-                // La data del commit in JGit è in secondi (epoch), la convertiamo in LocalDateTime
                 LocalDateTime commitDate = LocalDateTime.ofInstant(
-                        Instant.ofEpochSecond(commit.getCommitTime()),
-                        ZoneId.systemDefault()
-                );
+                        Instant.ofEpochSecond(commit.getCommitTime()), ZoneId.systemDefault());
 
-                // Caso della prima release: prendi tutti i commit fino alla data della release
-                if (previousReleaseDate == null) {
-                    if (!commitDate.isAfter(currentReleaseDate)) {
-                        release.getCommitList().add(commit);
-                    }
-                } else {
-                    // Release successive: prendi i commit nell'intervallo (previousReleaseDate, currentReleaseDate]
-                    if (commitDate.isAfter(previousReleaseDate) && !commitDate.isAfter(currentReleaseDate)) {
-                        release.getCommitList().add(commit);
-                    }
+                boolean isInFirstRelease = previousReleaseDate == null && !commitDate.isAfter(currentReleaseDate);
+                boolean isInSubsequentRelease = previousReleaseDate != null
+                        && commitDate.isAfter(previousReleaseDate)
+                        && !commitDate.isAfter(currentReleaseDate);
+
+                if (isInFirstRelease || isInSubsequentRelease) {
+                    release.getCommitList().add(commit);
                 }
             }
-            // Aggiorna la data precedente per la prossima iterazione
+
             previousReleaseDate = currentReleaseDate;
-            Logger.getAnonymousLogger().log(Level.INFO, "Release {0}: find {1} commit.", new Object[]{release.getName(), release.getCommitList().size()});
+            Logger.getAnonymousLogger().log(Level.INFO,
+                    "Release {0}: find {1} commit.",
+                    new Object[]{release.getName(), release.getCommitList().size()});
         }
     }
 
     public void analyzeReleaseCode(Release release) throws IOException {
         if (release.getCommitList().isEmpty()) {
-            Logger.getAnonymousLogger().log(Level.WARNING, " Release {0} hasn't commit, code not be analyze.", release.getName());
+            Logger.getAnonymousLogger().log(Level.WARNING, " Release {0} have 0 commit, code not be analyze.", release.getName());
             return;
         }
 
@@ -180,28 +171,6 @@ public class GitExtraction {
         return method.getParameter(0).getType().asString().equals("String[]");
     }
 
-    /**
-     * Controlla se un costruttore è "semplice", cioè assegna solo parametri a campi.
-     */
-    private boolean isSimpleConstructor(ConstructorDeclaration constructor) {
-        if (constructor.getBody().getStatements().isEmpty()) {
-            return true; // Costruttore vuoto, es. default
-        }
-        for (Statement stmt : constructor.getBody().getStatements()) {
-            // Un costruttore semplice contiene solo assegnazioni del tipo "this.field = param;"
-            if (!(stmt instanceof ExpressionStmt)) return false;
-            ExpressionStmt exprStmt = (ExpressionStmt) stmt;
-            if (!(exprStmt.getExpression() instanceof AssignExpr)) return false;
-
-            AssignExpr assignExpr = (AssignExpr) exprStmt.getExpression();
-            if (!(assignExpr.getTarget() instanceof FieldAccessExpr)) return false;
-
-            FieldAccessExpr fieldAccess = (FieldAccessExpr) assignExpr.getTarget();
-            if (!(fieldAccess.getScope() instanceof ThisExpr)) return false;
-        }
-        return true;
-    }
-
 
     private void parseJavaFile(TreeWalk treeWalk, String path, Release release) throws IOException {
         ObjectId objectId = treeWalk.getObjectId(0);
@@ -274,53 +243,64 @@ public class GitExtraction {
             return 1;
         }
 
-        // Mappa per tenere traccia di quali campi sono usati da quale metodo
-        Map<MethodDeclaration, Set<String>> methodFieldUsage = new HashMap<>();
         List<String> fieldNames = fields.stream()
                 .flatMap(f -> f.getVariables().stream())
                 .map(v -> v.getNameAsString())
                 .collect(Collectors.toList());
 
+        Map<MethodDeclaration, Set<String>> methodFieldUsage = buildFieldUsageMap(methods, fieldNames);
+        Map<MethodDeclaration, List<MethodDeclaration>> adjList = buildAdjacencyList(methods, methodFieldUsage);
+        return countConnectedComponents(methods, adjList);
+    }
+
+    private Map<MethodDeclaration, Set<String>> buildFieldUsageMap(List<MethodDeclaration> methods, List<String> fieldNames) {
+        Map<MethodDeclaration, Set<String>> usageMap = new HashMap<>();
         for (MethodDeclaration method : methods) {
             Set<String> usedFields = new HashSet<>();
-            // Trova tutti gli accessi ai campi all'interno del metodo
-            method.findAll(FieldAccessExpr.class).forEach(fa -> {
+            for (FieldAccessExpr fa : method.findAll(FieldAccessExpr.class)) {
                 if (fieldNames.contains(fa.getNameAsString())) {
                     usedFields.add(fa.getNameAsString());
                 }
-            });
-            methodFieldUsage.put(method, usedFields);
+            }
+            usageMap.put(method, usedFields);
         }
+        return usageMap;
+    }
 
-        // Costruisci il grafo di adiacenza
+    private Map<MethodDeclaration, List<MethodDeclaration>> buildAdjacencyList(
+            List<MethodDeclaration> methods,
+            Map<MethodDeclaration, Set<String>> methodFieldUsage) {
+
         Map<MethodDeclaration, List<MethodDeclaration>> adjList = new HashMap<>();
-        for (MethodDeclaration m : methods) adjList.put(m, new ArrayList<>());
+        for (MethodDeclaration m : methods) {
+            adjList.put(m, new ArrayList<>());
+        }
 
         for (int i = 0; i < methods.size(); i++) {
             for (int j = i + 1; j < methods.size(); j++) {
                 MethodDeclaration m1 = methods.get(i);
                 MethodDeclaration m2 = methods.get(j);
-
-                Set<String> fields1 = methodFieldUsage.get(m1);
-                Set<String> fields2 = methodFieldUsage.get(m2);
-
-                // Se i metodi condividono almeno un campo, aggiungi un arco
-                if (!Collections.disjoint(fields1, fields2)) {
+                if (!Collections.disjoint(methodFieldUsage.get(m1), methodFieldUsage.get(m2))) {
                     adjList.get(m1).add(m2);
                     adjList.get(m2).add(m1);
                 }
             }
         }
 
-        // Calcola le componenti connesse usando DFS (Depth-First Search)
+        return adjList;
+    }
+
+    private int countConnectedComponents(List<MethodDeclaration> methods, Map<MethodDeclaration, List<MethodDeclaration>> adjList) {
         Set<MethodDeclaration> visited = new HashSet<>();
         int components = 0;
+
         for (MethodDeclaration method : methods) {
-            if (!visited.contains(method)) {
+            if (visited.add(method)) { // add() returns false if already present
                 dfs(method, adjList, visited);
                 components++;
             }
         }
+
         return components;
     }
 
@@ -390,7 +370,7 @@ public class GitExtraction {
         @Override
         public void visit(BinaryExpr n, AtomicInteger complexity) {
             super.visit(n, complexity);
-            // Incrementa per ogni operatore logico && o ||
+            // Aumenta la complessità cyclomatic per ogni operatore logico && o ||
             if (n.getOperator() == BinaryExpr.Operator.AND || n.getOperator() == BinaryExpr.Operator.OR) {
                 complexity.incrementAndGet();
             }
