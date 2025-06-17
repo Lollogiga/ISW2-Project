@@ -149,37 +149,35 @@ public class FileCSVGenerator {
         try {
             fileWriter = new FileWriter(fileTitle);
 
-            // 1. Scrivi l'intestazione (header) del CSV con tutte le colonne
-            String header = "MethodName,Release,LOC,Parameters_Count,Fan_Out,Cyclomatic_Complexity,LCOM,Churn,LOC_Added,Newcomer_Risk,n_Auth,Weekend_Commit_Ratio,isBuggy";
+            // 1. Modifica l'intestazione per usare "Release_Index" e metterlo per primo.
+            String header = "Release_Index,MethodName,LOC,Parameters_Count,Fan_Out,Cyclomatic_Complexity,LCOM,Churn,LOC_Added,Newcomer_Risk,n_Auth,Weekend_Commit_Ratio,isBuggy";
             writeToFile(fileWriter, header);
 
             Logger.getAnonymousLogger().log(Level.INFO, "Generazione dataset in corso... {0}", fileTitle);
 
-            // 2. Itera su ogni release, classe e metodo per creare le righe del dataset
             for (Release release : releases) {
                 for (JavaClass javaClass : release.getJavaClassList()) {
                     for (JavaMethod javaMethod : javaClass.getMethods()) {
-                        // Costruiamo l'identificatore del metodo
                         String methodName = javaClass.getPath() + "::" + javaMethod.getName();
 
-                        // Mettiamo tutti i valori in un array di stringhe per una facile unione
+                        // 2. Modifica l'ordine dei valori e usa getIndex()
                         String[] values = {
+                                String.valueOf(release.getIndex()), // Usa l'indice numerico
                                 methodName,
-                                release.getName(),
                                 String.valueOf(javaMethod.getLoc()),
                                 String.valueOf(javaMethod.getParametersCount()),
                                 String.valueOf(javaMethod.getFanOut()),
                                 String.valueOf(javaMethod.getCyclomaticComplexity()),
-                                String.valueOf(javaClass.getLcom()), // LCOM è a livello di classe
+                                String.valueOf(javaClass.getLcom()),
                                 String.valueOf(javaMethod.getChurn()),
                                 String.valueOf(javaMethod.getLocAdded()),
                                 String.valueOf(javaMethod.getNewcomerRisk()),
                                 String.valueOf(javaMethod.getnAuth()),
                                 String.valueOf(javaMethod.getWeekendCommitRatio()),
+                                // 3. Correzione: Converti il booleano 'isBuggy' in una stringa "YES" o "NO"
                                 javaMethod.isBuggy()
                         };
 
-                        // Uniamo i valori con una virgola per creare la riga CSV
                         String csvLine = String.join(",", values);
                         writeToFile(fileWriter, csvLine);
                     }
