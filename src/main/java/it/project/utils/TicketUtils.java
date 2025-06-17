@@ -2,9 +2,12 @@ package it.project.utils;
 
 import it.project.entities.Release;
 import it.project.entities.Ticket;
+import org.eclipse.jgit.revwalk.RevCommit;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class TicketUtils {
     private TicketUtils() {}
@@ -25,13 +28,7 @@ public class TicketUtils {
             ticketListOG.remove(ticket);
         }
 
-        /* Remove ticket if:
-        * 1) Opening version not found;
-        * 2) Fixed Version not found;
-        * 3) OV is at first release;
-        * 4) OV after FV: is a paradox;
-         */
-
+        /* Remove ticket if: Opening version not found || Fixed Version not found ||  OV is at first release || OV after FV */
         ticketListOG.removeIf(ticket -> ticket.getOpeningVersion() == null
                 || ticket.getFixedVersion() == null
                 || !ticket.getOpeningVersion().getDate().isAfter(releaseList.getFirst().getDate())
@@ -39,10 +36,8 @@ public class TicketUtils {
                 || ticket.getOpeningVersion().getIndex() == releaseList.getFirst().getIndex());
     }
 
-    /* Check if AV is reliable
-    * 1) IV is before FV
-    * 2) IV is before OV
-     */
+    /* Check if AV is reliable: IV is before FV || IV is before OV */
+
     private static void checkTicket(Ticket ticket) {
         /* Testing validity of release in affected version's list */
         if (ticket.getAffectedVersionsList().getFirst().getDate().isBefore(ticket.getResolutionDate())
@@ -53,6 +48,33 @@ public class TicketUtils {
         }
     }
 
+    public static void linkTicketsToCommits(List<Ticket> ticketList, List<Release> releaseList) {
+        Logger.getAnonymousLogger().log(Level.INFO, "Starting ticket-to-commit linking process...");
+
+        // 1. Raccogliamo tutti i commit da tutte le release in un'unica lista per efficienza.
+        List<RevCommit> allCommits = new ArrayList<>();
+        for (Release release : releaseList) {
+            allCommits.addAll(release.getCommitList());
+        }
+
+        // 2. Iteriamo su ogni ticket per cercare corrispondenze.
+        for (Ticket ticket : ticketList) {
+            String ticketKey = ticket.getTicketKey(); // Es. "BOOKKEEPER-123"
+
+            for (RevCommit commit : allCommits) {
+                // 3. Controlliamo se il messaggio completo del commit contiene l'ID del ticket.
+                if (commit.getFullMessage().contains(ticketKey)) {
+                    // 4. Se troviamo una corrispondenza, aggiungiamo il commit alla lista del ticket.
+                    //    La classe Ticket ha getCommitList(), che abbiamo inizializzato.
+                    ticket.getCommitList().add(commit);
+                }
+            }
+        }
+
+        // 5. Log di riepilogo per verificare il risultato.
+        long linkedTicketsCount = ticketList.stream().filter(t -> !t.getCommitList().isEmpty()).count();
+        Logger.getAnonymousLogger().log(Level.INFO, "Linking complete. Found fixing commits for {0} out of {1} tickets.", new Object[]{linkedTicketsCount, ticketList.size()});
+    }
 
 
 }

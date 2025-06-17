@@ -4,6 +4,7 @@ package it.project.utils;
 import it.project.entities.Release;
 import it.project.entities.JavaClass;
 import it.project.entities.JavaMethod;
+import it.project.entities.Ticket;
 
 import java.io.File;
 import java.io.FileWriter;
@@ -14,6 +15,7 @@ import java.nio.file.Paths;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 public class FileCSVGenerator {
     private final String directoryPath;
@@ -187,6 +189,54 @@ public class FileCSVGenerator {
 
         } catch (IOException e) {
             Logger.getAnonymousLogger().log(Level.SEVERE, "Errore durante la generazione del dataset CSV", e);
+        } finally {
+            closeWriter(fileWriter);
+        }
+    }
+
+    public void generateTicketSummary(List<Ticket> ticketList) {
+        FileWriter fileWriter = null;
+        String fileTitle = this.directoryPath + OTHERFILES + this.projName + "_ticket_summary.csv";
+
+        try {
+            fileWriter = new FileWriter(fileTitle);
+
+            // 1. Scrivi l'intestazione del CSV
+            writeToFile(fileWriter, "Key,Injected Version,Opening Version,Fixed Version,\"Affected Version List\"");
+
+            Logger.getAnonymousLogger().log(Level.INFO, "Generating ticket summary file at: {0}", fileTitle);
+
+            for (Ticket ticket : ticketList) {
+                // 2. Estrai i dati in modo sicuro, gestendo i valori null
+                String key = ticket.getTicketKey();
+
+                // Usiamo un operatore ternario per evitare NullPointerException
+                String iv = (ticket.getInjectedVersion() != null) ? ticket.getInjectedVersion().getName() : "N/A";
+                String ov = (ticket.getOpeningVersion() != null) ? ticket.getOpeningVersion().getName() : "N/A";
+                String fv = (ticket.getFixedVersion() != null) ? ticket.getFixedVersion().getName() : "N/A";
+
+                // 3. Formatta la lista delle Affected Versions come una singola stringa separata da spazi
+                String affectedVersions = ticket.getAffectedVersionsList().stream()
+                        .map(Release::getName)
+                        .collect(Collectors.joining(" "));
+
+                // Se la lista è vuota, usiamo "N/A" per coerenza
+                if (affectedVersions.isEmpty()) {
+                    affectedVersions = "N/A";
+                }
+
+                // 4. Assembla la riga CSV. Usiamo String.format per leggibilità e sicurezza.
+                //    Le virgolette intorno ad affectedVersions sono importanti per il formato CSV,
+                //    nel caso i nomi contengano caratteri speciali.
+                String csvLine = String.format("%s,%s,%s,%s,\"%s\"", key, iv, ov, fv, affectedVersions);
+
+                writeToFile(fileWriter, csvLine);
+            }
+
+            Logger.getAnonymousLogger().log(Level.INFO, "Ticket summary file generated successfully.");
+
+        } catch (IOException e) {
+            Logger.getAnonymousLogger().log(Level.SEVERE, "Error while generating ticket summary file", e);
         } finally {
             closeWriter(fileWriter);
         }
