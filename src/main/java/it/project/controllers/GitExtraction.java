@@ -11,7 +11,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.expr.FieldAccessExpr;
-import java.util.stream.Collectors;
 import com.github.javaparser.ast.stmt.BlockStmt;
 import com.github.javaparser.ast.stmt.ExpressionStmt;
 import com.github.javaparser.ast.stmt.ReturnStmt;
@@ -246,7 +245,7 @@ public class GitExtraction {
         List<String> fieldNames = fields.stream()
                 .flatMap(f -> f.getVariables().stream())
                 .map(v -> v.getNameAsString())
-                .collect(Collectors.toList());
+                .toList();
 
         Map<MethodDeclaration, Set<String>> methodFieldUsage = buildFieldUsageMap(methods, fieldNames);
         Map<MethodDeclaration, List<MethodDeclaration>> adjList = buildAdjacencyList(methods, methodFieldUsage);
@@ -370,7 +369,6 @@ public class GitExtraction {
         @Override
         public void visit(BinaryExpr n, AtomicInteger complexity) {
             super.visit(n, complexity);
-            // Aumenta la complessità cyclomatic per ogni operatore logico && o ||
             if (n.getOperator() == BinaryExpr.Operator.AND || n.getOperator() == BinaryExpr.Operator.OR) {
                 complexity.incrementAndGet();
             }

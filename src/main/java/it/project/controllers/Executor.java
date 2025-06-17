@@ -86,7 +86,7 @@ public class Executor {
             Logger.getAnonymousLogger().log(Level.INFO, "Release {0}: founded {1} class with method", new Object[]{release.getName(), release.getJavaClassList().size()});
         }
         //Export methodList in a csvFile:
-        csv.csv_generateMethodList(releaseList);
+        csv.generateMethodList(releaseList);
         Logger.getAnonymousLogger().log(Level.INFO, "CSV creation: methods for each release saved in resources/otherFiles/{0}_MethodList", projectName);
 
         //Extract metrics:

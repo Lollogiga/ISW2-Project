@@ -104,7 +104,7 @@ public class FileCSVGenerator {
         }
     }
 
-    public void csv_generateMethodList(List<Release> releases) {
+    public void generateMethodList(List<Release> releases) {
         FileWriter fileWriter = null;
         String fileTitle = this.directoryPath + OTHERFILES + this.projName + "_MethodList.csv";
 

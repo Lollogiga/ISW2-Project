@@ -28,7 +28,6 @@ public class TicketUtils {
             ticketListOG.remove(ticket);
         }
 
-        /* Remove ticket if: Opening version not found || Fixed Version not found ||  OV is at first release || OV after FV */
         ticketListOG.removeIf(ticket -> ticket.getOpeningVersion() == null
                 || ticket.getFixedVersion() == null
                 || !ticket.getOpeningVersion().getDate().isAfter(releaseList.getFirst().getDate())
