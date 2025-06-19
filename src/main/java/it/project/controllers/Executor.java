@@ -67,7 +67,7 @@ public class Executor {
 
         //Avoid snoring: keep only first 40% of releases:
         int totalReleases = releaseList.size();
-        int releasesToKeep = (int) Math.round(totalReleases * 0.40);
+        int releasesToKeep = (int) Math.round(totalReleases * 0.20);
 
         Logger.getAnonymousLogger().log(Level.INFO, "Anti-snoring filter: Total releases are {0}. Keeping the first 40% ({1} releases).", new Object[]{totalReleases, releasesToKeep});
         releaseList.removeIf(release -> release.getIndex() > releasesToKeep);
@@ -100,8 +100,21 @@ public class Executor {
             Logger.getAnonymousLogger().log(Level.SEVERE, "Error during metrics calculation", e);
         }
 
-        //Save metrics in dataset(bugginess not yet computed)
         csv.generateDataset(releaseList);
         Logger.getAnonymousLogger().log(Level.INFO, "CSV creation: metrics for each method saved in resources/otherFiles/{0}_dateset: bugginess not yet computed", projectName);
+
+        /*Walk forward*/
+        try {
+            Git gitInstance = it.project.utils.RepoFactory.getGit(); // Assicurati di avere l'istanza git
+            WalkForward walkForward = new WalkForward(releaseList, ticketList, csv, gitInstance);
+            walkForward.execute();
+        } catch (IOException e) {
+            Logger.getAnonymousLogger().log(Level.SEVERE, "An error occurred during the Walk-Forward process", e);
+        }
+
+        Logger.getAnonymousLogger().log(Level.INFO, "Training set and testing set files generated!");
+
     }
+
+
 }

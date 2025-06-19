@@ -27,6 +27,12 @@
         </dependency>
 
         <dependency>
+            <groupId>com.google.code.gson</groupId>
+            <artifactId>gson</artifactId>
+            <version>2.10.1</version> <!-- Controlla l'ultima versione -->
+        </dependency>
+
+        <dependency>
             <groupId>com.github.javaparser</groupId>
             <artifactId>javaparser-core</artifactId>
             <version>3.25.9</version> <!-- o l'ultima versione disponibile -->

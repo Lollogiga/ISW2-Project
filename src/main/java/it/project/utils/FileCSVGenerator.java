@@ -21,8 +21,8 @@ public class FileCSVGenerator {
     private final String directoryPath;
     private final String projName;
 
-    private static final String TRAINING_FILE = "_trainingSet";
-    private static final String TESTING_FILE = "_testingSet";
+    //private static final String TRAINING_FILE = "_trainingSet";
+    //private static final String TESTING_FILE = "_testingSet";
 
     private static final String TESTING = "testing" + File.separator;
     private static final String TRAINING = "training" + File.separator;
@@ -78,6 +78,7 @@ public class FileCSVGenerator {
             }
         }
     }
+
 
     public void generateReleaseInfo(List<Release> releases) {
         FileWriter fileWriter = null;
@@ -238,6 +239,52 @@ public class FileCSVGenerator {
         } finally {
             closeWriter(fileWriter);
         }
+    }
+
+    private void generateDatasetFile(List<Release> releases, String filePath) {
+        FileWriter fileWriter = null;
+        try {
+            fileWriter = new FileWriter(filePath);
+
+            // Intestazione del CSV
+            writeToFile(fileWriter, "Index,MethodName,LOC,CyclomaticComplexity,Churn,LocAdded,NewcomerRisk,Auth,WeekendCommitRatio,isBuggy");
+
+            for (Release release : releases) {
+                for (JavaClass jc : release.getJavaClassList()) {
+                    for (JavaMethod jm : jc.getMethods()) {
+                        String line = String.join(",",
+                                String.valueOf(release.getIndex()),
+                                "\"" + jc.getPath() + "::" + jm.getName() + "\"", // Metti tra virgolette per sicurezza
+                                String.valueOf(jm.getLoc()),
+                                String.valueOf(jm.getCyclomaticComplexity()),
+                                String.valueOf(jm.getChurn()),
+                                String.valueOf(jm.getLocAdded()),
+                                String.valueOf(jm.getNewcomerRisk()),
+                                String.valueOf(jm.getnAuth()),
+                                String.valueOf(jm.getWeekendCommitRatio()),
+                                jm.isBuggy()
+                        );
+                        writeToFile(fileWriter, line);
+                    }
+                }
+            }
+        } catch (IOException e) {
+            Logger.getAnonymousLogger().log(Level.SEVERE, "Error generating dataset file: " + filePath, e);
+        } finally {
+            closeWriter(fileWriter);
+        }
+    }
+
+    public void generateTrainingSet(List<Release> releases, int iteration) {
+        String filePath = this.directoryPath + TRAINING_CSV + this.projName + "_training_iter_" + iteration + ".csv";
+        Logger.getAnonymousLogger().log(Level.INFO, "Generating Training Set: {0}", filePath);
+        generateDatasetFile(releases, filePath);
+    }
+
+    public void generateTestingSet(List<Release> releases, int iteration) {
+        String filePath = this.directoryPath + TESTING_CSV + this.projName + "_testing_iter_" + iteration + ".csv";
+        Logger.getAnonymousLogger().log(Level.INFO, "Generating Testing Set: {0}", filePath);
+        generateDatasetFile(releases, filePath);
     }
 
 }

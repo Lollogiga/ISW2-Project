@@ -139,4 +139,8 @@ public class JavaMethod {
             return "No";
         }
     }
+
+    public void setBuggy(boolean b) {
+        this.isBuggy = b;
+    }
 }
