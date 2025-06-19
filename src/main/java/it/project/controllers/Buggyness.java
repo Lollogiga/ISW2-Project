@@ -5,7 +5,7 @@ import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParseResult;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.Node;
-import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.body.CallableDeclaration;
 import it.project.entities.*;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.diff.DiffEntry;
@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 public class Buggyness {
 
@@ -39,7 +40,7 @@ public class Buggyness {
      * @param releasesToLabel Il sottoinsieme di release i cui metodi devono essere etichettati (per training o testing).
      * @param ticketsToUse Il sottoinsieme di ticket da usare per l'etichettatura.
      */
-    public void calculate(List<Release> releasesToLabel, List<Ticket> ticketsToUse) throws IOException {
+    public void calculate(List<Release> releasesToLabel, List<Ticket> ticketsToUse){
         // 1. Reset della bugginess per le release che stiamo per etichettare.
         // Fondamentale per non contaminare le iterazioni del Walk-Forward.
         for (Release release : releasesToLabel) {
@@ -138,14 +139,19 @@ public class Buggyness {
         if (!result.isSuccessful() || result.getResult().isEmpty()) return methodNames;
         CompilationUnit cu = result.getResult().get();
 
-        //TODO:VERIFY
         for (Edit edit : editList) {
             int startLine = edit.getBeginA() + 1;
             int endLine = edit.getEndA();
-            List<MethodDeclaration> methods = cu.findAll(MethodDeclaration.class);
-            for (MethodDeclaration method : methods) {
-                if (isOverlapping(method, startLine, endLine)) {
-                    methodNames.add(method.getNameAsString());
+
+            // Aggiungi il wildcard '?' per soddisfare SonarCloud
+            List<CallableDeclaration<?>> callables = cu.findAll(CallableDeclaration.class)
+                    .stream()
+                    .map(c -> (CallableDeclaration<?>) c) // Potrebbe essere necessario un cast esplicito
+                    .collect(Collectors.toList());
+
+            for (CallableDeclaration<?> callable : callables) {
+                if (isOverlapping(callable, startLine, endLine)) {
+                    methodNames.add(callable.getNameAsString());
                 }
             }
         }
