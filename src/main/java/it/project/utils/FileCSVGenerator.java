@@ -267,7 +267,7 @@ public class FileCSVGenerator {
                 }
             }
         } catch (IOException e) {
-            Logger.getAnonymousLogger().log(Level.SEVERE,"Error generating dataset file: " + filePath, e);
+            Logger.getAnonymousLogger().log(Level.SEVERE, e, () -> "Error generating dataset file: " + filePath);
 
         } finally {
             closeWriter(fileWriter);

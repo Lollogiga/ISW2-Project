@@ -72,7 +72,7 @@ public class Buggyness {
      * @param release La release da etichettare.
      * @param ticket Il ticket che contiene i commit di fix.
      */
-    private void labelMethodsInRelease(Release release, Ticket ticket) throws IOException {
+    private void labelMethodsInRelease(Release release, Ticket ticket){
         List<RevCommit> fixCommits = ticket.getCommitList();
         if (fixCommits == null || fixCommits.isEmpty()) return;
 
@@ -93,7 +93,7 @@ public class Buggyness {
                 }
             }
         } catch (Exception e) {
-            Logger.getAnonymousLogger().log(Level.SEVERE, "Could not process commit " + fixCommit.getId(), e);
+            Logger.getAnonymousLogger().log(Level.SEVERE, e, () -> "Could not process commit " + fixCommit.getId());
         }
     }
 
@@ -116,14 +116,14 @@ public class Buggyness {
 
     private void labelBuggyMethodsInFile(Release release, String filePath, Set<String> buggyMethodNames) {
         for (JavaClass javaClass : release.getJavaClassList()) {
-            if (!javaClass.getPath().equals(filePath)) continue;
-
-            for (JavaMethod javaMethod : javaClass.getMethods()) {
-                if (buggyMethodNames.contains(javaMethod.getName())) {
-                    javaMethod.setBuggy(true);
+            if (javaClass.getPath().equals(filePath)) {
+                for (JavaMethod javaMethod : javaClass.getMethods()) {
+                    if (buggyMethodNames.contains(javaMethod.getName())) {
+                        javaMethod.setBuggy(true);
+                    }
                 }
+                return; // Class found and processed; exit method.
             }
-            break; // Class found and processed; exit loop.
         }
     }
 
