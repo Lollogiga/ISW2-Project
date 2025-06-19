@@ -28,7 +28,9 @@ public class WalkForward {
         Logger.getAnonymousLogger().log(Level.INFO, "Starting walk forward...");
 
         int totalReleases = fullReleaseList.size();
-        for(int i = 1; i < totalReleases; i++){
+        int loopLimit = (int) Math.round(totalReleases * 0.40);
+
+        for(int i = 1; i < loopLimit; i++){
             int trainingSetLastIndex = i;
             int testingSetIndex = i + 1;
 
@@ -43,7 +45,7 @@ public class WalkForward {
 
             //2. Select ticket for labelling: We want realistic training set, select only ticket with fix in training set
             List<Ticket> trainingTickets = fullTicketList.stream()
-                    .filter(t -> t.getFixedVersion() != null && t.getFixedVersion().getIndex() <= lastTrainIndex)
+                    .filter(t -> t.getFixedVersion() != null && t.getFixedVersion().getIndex() <= trainingSetLastIndex+1)
                     .toList();
 
             //3. Labelling for training set

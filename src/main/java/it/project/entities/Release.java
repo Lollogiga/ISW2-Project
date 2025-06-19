@@ -3,6 +3,7 @@ package it.project.entities;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 import org.eclipse.jgit.revwalk.RevCommit;
 
@@ -54,6 +55,22 @@ public class Release {
 
     public String getVersionID() {
         return versionID;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Release release = (Release) o;
+        // Usa un campo che è garantito essere unico per ogni release.
+        // versionID è una scelta eccellente. Se non ce l'hai, usa 'name'.
+        return Objects.equals(versionID, release.versionID);
+    }
+
+    @Override
+    public int hashCode() {
+        // Usa lo stesso campo usato in equals.
+        return Objects.hash(versionID);
     }
 }
 

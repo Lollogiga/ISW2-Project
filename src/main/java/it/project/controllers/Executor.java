@@ -12,6 +12,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 public class Executor {
     private static final String DIRECTORY = "src/main/resources/";
@@ -65,13 +66,27 @@ public class Executor {
             index++;
         }
 
+        for (Ticket ticket : ticketList) {
+            if (ticket.getFixedVersion() != null && ticket.getFixedVersion().getIndex() == 1) {
+                String ivName = (ticket.getInjectedVersion() != null) ? ticket.getInjectedVersion().getName() : "null";
+                String avNames = ticket.getAffectedVersionsList().stream()
+                        .map(Release::getName)
+                        .collect(Collectors.joining(", "));
+                Logger.getAnonymousLogger().log(Level.INFO,
+                        "[DEBUG TICKET FV=1] Key: {0}, IV: {1}, AV: [{2}]",
+                        new Object[]{ticket.getTicketKey(), ivName, avNames});
+            }
+        }
+
         //Avoid snoring: keep only first 40% of releases:
         int totalReleases = releaseList.size();
-        int releasesToKeep = (int) Math.round(totalReleases * 0.20);
+        int releasesToKeep = (int) Math.round(totalReleases * 0.40);
+        if(releasesToKeep == 0 && totalReleases > 0) releasesToKeep = 1;
 
         Logger.getAnonymousLogger().log(Level.INFO, "Anti-snoring filter: Total releases are {0}. Keeping the first 40% ({1} releases).", new Object[]{totalReleases, releasesToKeep});
-        releaseList.removeIf(release -> release.getIndex() > releasesToKeep);
-        Logger.getAnonymousLogger().log(Level.INFO, "Anti-snoring filter applied. Final number of releases: {0}", releaseList.size());
+        List<Release> releaseToProcess = releaseList.subList(0, releasesToKeep);
+
+        Logger.getAnonymousLogger().log(Level.INFO, "Anti-snoring filter applied. Final number of releases: {0}", releaseToProcess.size());
 
         //Linkage tickets and commits:
         Logger.getAnonymousLogger().log(Level.INFO, "Data extraction: Tickets Summary");
@@ -81,12 +96,12 @@ public class Executor {
 
         //Extract class and method:
         Logger.getAnonymousLogger().log((Level.INFO), "Data extraction: Extraction class and method");
-        for (Release release : releaseList) {
+        for (Release release : releaseToProcess) {
             gitExtraction.analyzeReleaseCode(release);
             Logger.getAnonymousLogger().log(Level.INFO, "Release {0}: founded {1} class with method", new Object[]{release.getName(), release.getJavaClassList().size()});
         }
         //Export methodList in a csvFile:
-        csv.generateMethodList(releaseList);
+        csv.generateMethodList(releaseToProcess);
         Logger.getAnonymousLogger().log(Level.INFO, "CSV creation: methods for each release saved in resources/otherFiles/{0}_MethodList", projectName);
 
         //Extract metrics:
@@ -94,13 +109,13 @@ public class Executor {
         try {
             Git gitInstance = it.project.utils.RepoFactory.getGit();
             MetricsCalculator metricsCalculator = new MetricsCalculator(gitInstance);
-            metricsCalculator.calculateHistoricalMetrics(releaseList);
+            metricsCalculator.calculateHistoricalMetrics(releaseToProcess);
             Logger.getAnonymousLogger().log(Level.INFO, "Metrics calculated.");
         } catch (IOException e) {
             Logger.getAnonymousLogger().log(Level.SEVERE, "Error during metrics calculation", e);
         }
 
-        csv.generateDataset(releaseList);
+        csv.generateDataset(releaseToProcess);
         Logger.getAnonymousLogger().log(Level.INFO, "CSV creation: metrics for each method saved in resources/otherFiles/{0}_dateset: bugginess not yet computed", projectName);
 
         /*Walk forward*/
