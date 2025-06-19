@@ -5,7 +5,7 @@ import it.project.entities.Ticket;
 import it.project.utils.FileCSVGenerator;
 import org.eclipse.jgit.api.Git;
 
-import java.io.IOException;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
@@ -24,7 +24,7 @@ public class WalkForward {
         this.buggyness = new Buggyness(git);
     }
 
-    public void execute() throws IOException {
+    public void execute() {
         Logger.getAnonymousLogger().log(Level.INFO, "Starting walk forward...");
 
         int totalReleases = fullReleaseList.size();

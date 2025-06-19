@@ -23,7 +23,7 @@ import java.io.IOException;
 import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import java.util.stream.Collectors;
+
 
 public class Buggyness {
 
@@ -143,11 +143,12 @@ public class Buggyness {
             int startLine = edit.getBeginA() + 1;
             int endLine = edit.getEndA();
 
-            // Aggiungi il wildcard '?' per soddisfare SonarCloud
-            List<CallableDeclaration<?>> callables = cu.findAll(CallableDeclaration.class)
-                    .stream()
-                    .map(c -> (CallableDeclaration<?>) c) // Potrebbe essere necessario un cast esplicito
-                    .collect(Collectors.toList());
+
+            @SuppressWarnings("unchecked")
+            List<CallableDeclaration<?>> callables = (List<CallableDeclaration<?>>) (List<?>)
+                    cu.findAll(CallableDeclaration.class)
+                            .stream()
+                            .toList();
 
             for (CallableDeclaration<?> callable : callables) {
                 if (isOverlapping(callable, startLine, endLine)) {
