@@ -21,8 +21,6 @@ public class FileCSVGenerator {
     private final String directoryPath;
     private final String projName;
 
-    //private static final String TRAINING_FILE = "_trainingSet";
-    //private static final String TESTING_FILE = "_testingSet";
 
     private static final String TESTING = "testing" + File.separator;
     private static final String TRAINING = "training" + File.separator;
@@ -269,7 +267,8 @@ public class FileCSVGenerator {
                 }
             }
         } catch (IOException e) {
-            Logger.getAnonymousLogger().log(Level.SEVERE, "Error generating dataset file: " + filePath, e);
+            Logger.getAnonymousLogger().log(Level.SEVERE,"Error generating dataset file: " + filePath, e);
+
         } finally {
             closeWriter(fileWriter);
         }

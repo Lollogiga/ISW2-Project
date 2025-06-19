@@ -5,7 +5,7 @@ import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParseResult;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.Node;
-import com.github.javaparser.ast.body.CallableDeclaration;
+import com.github.javaparser.ast.body.MethodDeclaration;
 import it.project.entities.*;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.diff.DiffEntry;
@@ -78,35 +78,52 @@ public class Buggyness {
 
         for (RevCommit fixCommit : fixCommits) {
             if (fixCommit.getParentCount() == 0) continue;
+
             RevCommit parentCommit = fixCommit.getParent(0);
+            processFixCommit(fixCommit, parentCommit, release);
+        }
+    }
 
-            try (DiffFormatter df = new DiffFormatter(DisabledOutputStream.INSTANCE)) {
-                df.setRepository(this.repository);
-                df.setDetectRenames(true);
-                List<DiffEntry> diffs = df.scan(parentCommit.getTree(), fixCommit.getTree());
-
-                for (DiffEntry diff : diffs) {
-                    String changedFilePath = diff.getNewPath();
-                    if (!changedFilePath.endsWith(".java")) continue;
-
-                    // Usiamo la nostra logica precisa per trovare i NOMI dei metodi modificati.
-                    Set<String> buggyMethodNames = getBuggyMethodNames(df, diff, parentCommit);
-
-                    // Etichettiamo i metodi corrispondenti nella release affetta.
-                    for (JavaClass javaClass : release.getJavaClassList()) {
-                        if (javaClass.getPath().equals(changedFilePath)) {
-                            for (JavaMethod javaMethod : javaClass.getMethods()) {
-                                if (buggyMethodNames.contains(javaMethod.getName())) {
-                                    javaMethod.setBuggy(true);
-                                }
-                            }
-                            break; // Ottimizzazione: trovata la classe, passiamo al prossimo file del diff.
-                        }
-                    }
+    private void processFixCommit(RevCommit fixCommit, RevCommit parentCommit, Release release) {
+        try (DiffFormatter df = createDiffFormatter()) {
+            List<DiffEntry> diffs = df.scan(parentCommit.getTree(), fixCommit.getTree());
+            for (DiffEntry diff : diffs) {
+                if (isJavaFile(diff)) {
+                    handleDiffEntry(diff, df, parentCommit, release);
                 }
-            } catch (Exception e) {
-                Logger.getAnonymousLogger().log(Level.SEVERE, "Could not process commit " + fixCommit.getId(), e);
             }
+        } catch (Exception e) {
+            Logger.getAnonymousLogger().log(Level.SEVERE, "Could not process commit " + fixCommit.getId(), e);
+        }
+    }
+
+    private DiffFormatter createDiffFormatter() {
+        DiffFormatter df = new DiffFormatter(DisabledOutputStream.INSTANCE);
+        df.setRepository(this.repository);
+        df.setDetectRenames(true);
+        return df;
+    }
+
+    private boolean isJavaFile(DiffEntry diff) {
+        return diff.getNewPath().endsWith(".java");
+    }
+
+    private void handleDiffEntry(DiffEntry diff, DiffFormatter df, RevCommit parentCommit, Release release) throws IOException {
+        String changedFilePath = diff.getNewPath();
+        Set<String> buggyMethodNames = getBuggyMethodNames(df, diff, parentCommit);
+        labelBuggyMethodsInFile(release, changedFilePath, buggyMethodNames);
+    }
+
+    private void labelBuggyMethodsInFile(Release release, String filePath, Set<String> buggyMethodNames) {
+        for (JavaClass javaClass : release.getJavaClassList()) {
+            if (!javaClass.getPath().equals(filePath)) continue;
+
+            for (JavaMethod javaMethod : javaClass.getMethods()) {
+                if (buggyMethodNames.contains(javaMethod.getName())) {
+                    javaMethod.setBuggy(true);
+                }
+            }
+            break; // Class found and processed; exit loop.
         }
     }
 
@@ -121,13 +138,14 @@ public class Buggyness {
         if (!result.isSuccessful() || result.getResult().isEmpty()) return methodNames;
         CompilationUnit cu = result.getResult().get();
 
+        //TODO:VERIFY
         for (Edit edit : editList) {
             int startLine = edit.getBeginA() + 1;
             int endLine = edit.getEndA();
-            List<CallableDeclaration> callables = cu.findAll(CallableDeclaration.class);
-            for (CallableDeclaration callable : callables) {
-                if (isOverlapping(callable, startLine, endLine)) {
-                    methodNames.add(callable.getNameAsString());
+            List<MethodDeclaration> methods = cu.findAll(MethodDeclaration.class);
+            for (MethodDeclaration method : methods) {
+                if (isOverlapping(method, startLine, endLine)) {
+                    methodNames.add(method.getNameAsString());
                 }
             }
         }
