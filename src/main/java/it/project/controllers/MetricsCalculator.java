@@ -19,15 +19,18 @@ import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+
 public class MetricsCalculator {
 
     private final Git git;
+    private final CodeSmellAnalyzer codeSmellAnalyzer;
 
     public MetricsCalculator(Git git) {
         this.git = git;
+        this.codeSmellAnalyzer = new CodeSmellAnalyzer() ;
     }
 
-    public void calculateHistoricalMetrics(List<Release> releases) throws IOException {
+    public void calculateHistoricalMetrics(List<Release> releases) throws IOException, InterruptedException {
         // Mappa per tenere traccia degli autori della release precedente per il calcolo del NewcomerRisk
         Map<String, Set<String>> previousAuthors = new HashMap<>();
 
@@ -37,6 +40,9 @@ public class MetricsCalculator {
             for (JavaClass javaClass : release.getJavaClassList()) {
                 for (JavaMethod javaMethod : javaClass.getMethods()) {
                     calculateMetricsForMethod(javaMethod, release.getCommitList(), previousAuthors, currentAuthors);
+                    int smellCount = codeSmellAnalyzer.countSmells(javaMethod);
+                    javaMethod.setnSmells(smellCount);
+
                 }
             }
             // Aggiorna gli autori per la prossima iterazione

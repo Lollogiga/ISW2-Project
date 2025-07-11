@@ -245,7 +245,7 @@ public class FileCSVGenerator {
             fileWriter = new FileWriter(filePath);
 
             // Intestazione del CSV
-            writeToFile(fileWriter, "Index,MethodName,LOC,CyclomaticComplexity,Churn,LocAdded,NewcomerRisk,Auth,WeekendCommitRatio,isBuggy");
+            writeToFile(fileWriter, "Index,MethodName,LOC,CyclomaticComplexity,Churn,LocAdded,NewcomerRisk,Auth,WeekendCommitRatio, nSmell, isBuggy");
 
             for (Release release : releases) {
                 for (JavaClass jc : release.getJavaClassList()) {
@@ -260,6 +260,7 @@ public class FileCSVGenerator {
                                 String.valueOf(jm.getNewcomerRisk()),
                                 String.valueOf(jm.getnAuth()),
                                 String.valueOf(jm.getWeekendCommitRatio()),
+                                String.valueOf(jm.getnSmells()),
                                 jm.isBuggy()
                         );
                         writeToFile(fileWriter, line);

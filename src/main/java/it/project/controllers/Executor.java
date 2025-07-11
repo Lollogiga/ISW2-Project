@@ -80,7 +80,7 @@ public class Executor {
 
         //Avoid snoring: keep only first 40% of releases:
         int totalReleases = releaseList.size();
-        int releasesToKeep = (int) Math.round(totalReleases * 0.40);
+        int releasesToKeep = (int) Math.round(totalReleases * 0.30);
         if(releasesToKeep == 0 && totalReleases > 0) releasesToKeep = 1;
 
         Logger.getAnonymousLogger().log(Level.INFO, "Anti-snoring filter: Total releases are {0}. Keeping the first 40% ({1} releases).", new Object[]{totalReleases, releasesToKeep});
@@ -100,6 +100,7 @@ public class Executor {
             gitExtraction.analyzeReleaseCode(release);
             Logger.getAnonymousLogger().log(Level.INFO, "Release {0}: founded {1} class with method", new Object[]{release.getName(), release.getJavaClassList().size()});
         }
+
         //Export methodList in a csvFile:
         csv.generateMethodList(releaseToProcess);
         Logger.getAnonymousLogger().log(Level.INFO, "CSV creation: methods for each release saved in resources/otherFiles/{0}_MethodList", projectName);
@@ -111,7 +112,7 @@ public class Executor {
             MetricsCalculator metricsCalculator = new MetricsCalculator(gitInstance);
             metricsCalculator.calculateHistoricalMetrics(releaseToProcess);
             Logger.getAnonymousLogger().log(Level.INFO, "Metrics calculated.");
-        } catch (IOException e) {
+        } catch (IOException | InterruptedException e) {
             Logger.getAnonymousLogger().log(Level.SEVERE, "Error during metrics calculation", e);
         }
 
@@ -120,7 +121,7 @@ public class Executor {
 
         /*Walk forward*/
         try {
-            Git gitInstance = it.project.utils.RepoFactory.getGit(); // Assicurati di avere l'istanza git
+            Git gitInstance = it.project.utils.RepoFactory.getGit();
             WalkForward walkForward = new WalkForward(releaseList, ticketList, csv, gitInstance);
             walkForward.execute();
         } catch (IOException e) {
@@ -128,6 +129,7 @@ public class Executor {
         }
 
         Logger.getAnonymousLogger().log(Level.INFO, "Training set and testing set files generated!");
+
 
     }
 

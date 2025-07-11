@@ -18,6 +18,7 @@ public class JavaMethod {
     private double newcomerRisk;
     private int nAuth;
     private double weekendCommitRatio;
+    private int nSmells;
     private boolean isBuggy;
 
     public JavaMethod(String name, String content, Release release, int startLine, int endLine) {
@@ -38,6 +39,7 @@ public class JavaMethod {
         this.newcomerRisk = 0.0;
         this.nAuth = 0;
         this.weekendCommitRatio = 0.0;
+        this.nSmells = 0;
     }
 
     public String getName() {
@@ -139,6 +141,12 @@ public class JavaMethod {
             return "No";
         }
     }
+
+    public int getnSmells() {
+        return nSmells;
+    }
+
+    public void setnSmells(int nSmells) {}
 
     public void setBuggy(boolean b) {
         this.isBuggy = b;
