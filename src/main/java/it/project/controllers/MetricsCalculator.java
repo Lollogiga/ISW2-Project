@@ -3,6 +3,7 @@ package it.project.controllers;
 import it.project.entities.JavaClass;
 import it.project.entities.JavaMethod;
 import it.project.entities.Release;
+import it.project.entities.Smell;
 import it.project.utils.PmdParser;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.diff.DiffEntry;
@@ -34,30 +35,41 @@ public class MetricsCalculator {
     }
 
     public void calculateHistoricalMetrics(List<Release> releases) throws IOException {
-        // Mappa per tenere traccia degli autori della release precedente per il calcolo del NewcomerRisk
         Map<String, Set<String>> previousAuthors = new HashMap<>();
 
         for (Release release : releases) {
             File reportFile = new File(git.getRepository().getWorkTree(), "pmd-reports/pmd-" + release.getName() + ".xml");
-            Map<String, List<String>> smellsMap = new PmdParser().parseReport(reportFile);
+            Path repoRoot = git.getRepository().getWorkTree().toPath().toAbsolutePath();
+
 
             Map<String, Set<String>> currentAuthors = new HashMap<>();
             Logger.getAnonymousLogger().log(Level.INFO, "Calcolo metriche per release {0}...", release.getName());
+
             for (JavaClass javaClass : release.getJavaClassList()) {
                 for (JavaMethod javaMethod : javaClass.getMethods()) {
                     calculateMetricsForMethod(javaMethod, release.getCommitList(), previousAuthors, currentAuthors);
-                    String methodKey = getString(javaClass, javaMethod);
 
-                    int smellCount = smellsMap.getOrDefault(methodKey, Collections.emptyList()).size();
-                    javaMethod.setnSmells(smellCount);
+                    Map<String, List<Smell>> smellsMap = new PmdParser().parseReport(reportFile, repoRoot.toFile());
 
+                    String relativePath = javaClass.getPath();
+                    List<Smell> fileSmells = smellsMap.getOrDefault(relativePath, Collections.emptyList());
+
+                    int count = 0;
+                    for (Smell smell : fileSmells) {
+                        if (smell.getBeginLine() >= javaMethod.getStartLine() && smell.getBeginLine() <= javaMethod.getEndLine()) {
+                            count++;
+                        }
+                    }
+
+                    javaMethod.setnSmells(count);
 
                 }
             }
-            // Aggiorna gli autori per la prossima iterazione
+
             previousAuthors = currentAuthors;
         }
     }
+
 
     private String getString(JavaClass javaClass, JavaMethod javaMethod) {
         Path repoRoot = git.getRepository().getWorkTree().toPath().toAbsolutePath();

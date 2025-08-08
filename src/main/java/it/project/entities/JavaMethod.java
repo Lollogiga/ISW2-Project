@@ -146,7 +146,9 @@ public class JavaMethod {
         return nSmells;
     }
 
-    public void setnSmells(int nSmells) {}
+    public void setnSmells(int nSmells) {
+        this.nSmells = nSmells;
+    }
 
     public void setBuggy(boolean b) {
         this.isBuggy = b;

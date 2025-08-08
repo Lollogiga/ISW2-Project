@@ -173,6 +173,7 @@ public class FileCSVGenerator {
                                 String.valueOf(javaMethod.getNewcomerRisk()),
                                 String.valueOf(javaMethod.getnAuth()),
                                 String.valueOf(javaMethod.getWeekendCommitRatio()),
+                                String.valueOf(javaMethod.getnSmells()),
                                 // 3. Correzione: Converti il booleano 'isBuggy' in una stringa "YES" o "NO"
                                 javaMethod.isBuggy()
                         };

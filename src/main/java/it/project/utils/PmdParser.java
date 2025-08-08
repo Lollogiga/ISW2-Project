@@ -1,5 +1,6 @@
 package it.project.utils;
 
+import it.project.entities.Smell;
 import org.w3c.dom.*;
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.File;
@@ -7,39 +8,38 @@ import java.util.*;
 
 public class PmdParser {
 
-    public Map<String, List<String>> parseReport(File xmlFile) {
-        Map<String, List<String>> smellsByMethod = new HashMap<>();
+    public Map<String, List<Smell>> parseReport(File reportFile, File repoRoot) {
+        Map<String, List<Smell>> fileToSmells = new HashMap<>();
 
         try {
-            Document doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(xmlFile);
+            Document doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(reportFile);
             doc.getDocumentElement().normalize();
 
-            NodeList violations = doc.getElementsByTagName("violation");
+            NodeList fileNodes = doc.getElementsByTagName("file");
 
-            for (int i = 0; i < violations.getLength(); i++) {
-                Element violation = (Element) violations.item(i);
-                String absolutePath = ((Element) violation.getParentNode()).getAttribute("name");
-                String rule = violation.getAttribute("rule");
+            for (int i = 0; i < fileNodes.getLength(); i++) {
+                Element fileElement = (Element) fileNodes.item(i);
+                String absPath = fileElement.getAttribute("name");
+                File absFile = new File(absPath);
+                String relPath = repoRoot.toURI().relativize(absFile.toURI()).getPath();
 
-                int beginLine = Integer.parseInt(violation.getAttribute("beginline"));
-                int endLine = Integer.parseInt(violation.getAttribute("endline"));
+                NodeList violations = fileElement.getElementsByTagName("violation");
 
-                // ✅ Path assoluto (da XML) → normalizzato rispetto alla root del repository
-                File absoluteFile = new File(absolutePath);
-                File repoRoot = xmlFile.getParentFile().getParentFile(); // es: tmp/bookkeeper
+                for (int j = 0; j < violations.getLength(); j++) {
+                    Element v = (Element) violations.item(j);
+                    int begin = Integer.parseInt(v.getAttribute("beginline"));
+                    int end = Integer.parseInt(v.getAttribute("endline"));
 
-                String normalizedPath = repoRoot.toURI().relativize(absoluteFile.toURI()).getPath();
-
-                // Chiave compatibile con quella usata in GitExtraction
-                String key = normalizedPath + "::" + beginLine + "-" + endLine;
-
-                smellsByMethod.computeIfAbsent(key, k -> new ArrayList<>()).add(rule);
+                    fileToSmells
+                            .computeIfAbsent(relPath, k -> new ArrayList<>())
+                            .add(new Smell(begin, end));
+                }
             }
 
         } catch (Exception e) {
-            System.err.println("Errore durante il parsing del report PMD: " + e.getMessage());
+            e.printStackTrace();
         }
 
-        return smellsByMethod;
+        return fileToSmells;
     }
 }
