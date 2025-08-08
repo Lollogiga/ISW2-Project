@@ -3,6 +3,7 @@ package it.project.controllers;
 import it.project.entities.JavaClass;
 import it.project.entities.JavaMethod;
 import it.project.entities.Release;
+import it.project.utils.PmdParser;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.diff.DiffEntry;
 import org.eclipse.jgit.diff.DiffFormatter;
@@ -10,7 +11,9 @@ import org.eclipse.jgit.diff.Edit;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.util.io.DisabledOutputStream;
 
+import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -23,31 +26,55 @@ import java.util.logging.Logger;
 public class MetricsCalculator {
 
     private final Git git;
-    private final CodeSmellAnalyzer codeSmellAnalyzer;
+
 
     public MetricsCalculator(Git git) {
         this.git = git;
-        this.codeSmellAnalyzer = new CodeSmellAnalyzer() ;
+
     }
 
-    public void calculateHistoricalMetrics(List<Release> releases) throws IOException, InterruptedException {
+    public void calculateHistoricalMetrics(List<Release> releases) throws IOException {
         // Mappa per tenere traccia degli autori della release precedente per il calcolo del NewcomerRisk
         Map<String, Set<String>> previousAuthors = new HashMap<>();
 
         for (Release release : releases) {
+            File reportFile = new File(git.getRepository().getWorkTree(), "pmd-reports/pmd-" + release.getName() + ".xml");
+            Map<String, List<String>> smellsMap = new PmdParser().parseReport(reportFile);
+
             Map<String, Set<String>> currentAuthors = new HashMap<>();
             Logger.getAnonymousLogger().log(Level.INFO, "Calcolo metriche per release {0}...", release.getName());
             for (JavaClass javaClass : release.getJavaClassList()) {
                 for (JavaMethod javaMethod : javaClass.getMethods()) {
                     calculateMetricsForMethod(javaMethod, release.getCommitList(), previousAuthors, currentAuthors);
-                    int smellCount = codeSmellAnalyzer.countSmells(javaMethod);
+                    String methodKey = getString(javaClass, javaMethod);
+
+                    int smellCount = smellsMap.getOrDefault(methodKey, Collections.emptyList()).size();
                     javaMethod.setnSmells(smellCount);
+
 
                 }
             }
             // Aggiorna gli autori per la prossima iterazione
             previousAuthors = currentAuthors;
         }
+    }
+
+    private String getString(JavaClass javaClass, JavaMethod javaMethod) {
+        Path repoRoot = git.getRepository().getWorkTree().toPath().toAbsolutePath();
+        Path methodPath = new File(javaClass.getPath()).toPath().toAbsolutePath();
+
+        Path relativePath;
+        try {
+            relativePath = repoRoot.relativize(methodPath);
+        } catch (IllegalArgumentException e) {
+            // fallback: usa il path assoluto se i due path sono incompatibili
+            relativePath = methodPath;
+        }
+
+        String normalizedPath = relativePath.toString().replace("\\", "/");
+
+
+        return normalizedPath + "::" + javaMethod.getStartLine() + "-" + javaMethod.getEndLine();
     }
 
     private void calculateMetricsForMethod(JavaMethod method, List<RevCommit> commits,

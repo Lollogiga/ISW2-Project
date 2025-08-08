@@ -6,6 +6,7 @@ import com.github.javaparser.ast.expr.ConditionalExpr;
 import com.github.javaparser.ast.stmt.*;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
 
+import java.io.File;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -38,6 +39,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 public class GitExtraction {
 
@@ -45,6 +47,151 @@ public class GitExtraction {
 
     public GitExtraction() throws IOException {
         this.git = RepoFactory.getGit();
+    }
+
+
+    public void analyzeReleaseCode(Release release) throws IOException {
+        if (release.getCommitList().isEmpty()) {
+            Logger.getAnonymousLogger().log(Level.WARNING, "Release {0} has 0 commits, code will not be analyzed.", release.getName());
+            return;
+        }
+
+        RevCommit lastCommit = release.getCommitList().get(release.getCommitList().size() - 1);
+
+        Logger.getAnonymousLogger().log(Level.INFO,
+                "Analisi codice per release {0} (commit: {1})",
+                new Object[]{release.getName(), lastCommit.getId().getName()});
+
+        // Checkout reale nel working tree
+        try {
+            git.checkout().setName(lastCommit.getName()).call();
+            Logger.getAnonymousLogger().log(Level.INFO, "Checkout effettuato per il commit della release {0}", release.getName());
+        } catch (Exception e) {
+            Logger.getAnonymousLogger().log(Level.SEVERE, "Errore durante il checkout della release {0}:" , release.getName() + e.getMessage());
+            return;
+        }
+
+        // Ora il codice è disponibile fisicamente nel file system → PMD potrà analizzarlo
+        // Avvia PMD
+        String realPath = git.getRepository().getWorkTree().getAbsolutePath();
+        runPMDAnalysis(realPath, release.getName());
+
+        // Analisi con JavaParser (come già facevi)
+        RevTree tree = lastCommit.getTree();
+        try (TreeWalk treeWalk = new TreeWalk(git.getRepository())) {
+            treeWalk.addTree(tree);
+            treeWalk.setRecursive(true);
+
+            while (treeWalk.next()) {
+                String path = treeWalk.getPathString();
+                if (path.endsWith(".java") && !path.toLowerCase().contains("/test/")) {
+                    parseJavaFile(treeWalk, path, release);
+                }
+            }
+        }
+    }
+
+
+
+
+    private List<File> findAllJavaFiles(File root) {
+        List<File> javaFiles = new ArrayList<>();
+        Queue<File> dirs = new LinkedList<>();
+        dirs.add(root);
+
+        while (!dirs.isEmpty()) {
+            File dir = dirs.poll();
+            File[] files = dir.listFiles();
+            if (files == null) continue;
+
+            for (File file : files) {
+                if (file.isDirectory()) {
+                    dirs.add(file);
+                } else if (file.getName().endsWith(".java")
+                        && !file.getAbsolutePath().toLowerCase().contains(File.separator + "test" + File.separator)) {
+                    javaFiles.add(file);
+                }
+            }
+        }
+
+        return javaFiles;
+    }
+
+    private void runPMDAnalysis(String projectRootPath, String releaseName) {
+        try {
+            Logger.getAnonymousLogger().log(Level.INFO, "Eseguo PMD su release: {0}", releaseName);
+
+            File root = new File(projectRootPath);
+            List<File> javaFiles = findAllJavaFiles(root);
+
+            if (javaFiles.isEmpty()) {
+                Logger.getAnonymousLogger().log(Level.WARNING, "Nessun file .java trovato in: {0}", projectRootPath);
+                return;
+            }
+
+            // PMD accetta un path separato da virgole
+            String fileList = javaFiles.stream()
+                    .map(File::getAbsolutePath)
+                    .collect(Collectors.joining(","));
+
+            File reportDir = new File(projectRootPath + "/pmd-reports");
+            if (!reportDir.exists()) {
+                reportDir.mkdirs();
+            }
+
+            File reportFile = new File(reportDir, "pmd-" + releaseName + ".xml");
+
+            Logger.getAnonymousLogger().log(Level.INFO, "PMD analizzerà {0} file.", javaFiles.size());
+
+            ProcessBuilder pb = new ProcessBuilder(
+                    "pmd",
+                    "check",
+                    "-d", fileList,
+                    "-R", "category/java/bestpractices.xml",
+                    "-f", "xml",
+                    "-r", reportFile.getAbsolutePath()
+            );
+
+            pb.inheritIO();
+            Process process = pb.start();
+            int exitCode = process.waitFor();
+
+            if (exitCode == 0) {
+                Logger.getAnonymousLogger().log(Level.INFO, "PMD completato per release {0}.", releaseName);
+            } else {
+                Logger.getAnonymousLogger().log(Level.WARNING, "PMD ha terminato con codice {0} per release {1}.", new Object[]{exitCode, releaseName});
+            }
+
+        } catch (IOException | InterruptedException e) {
+            Logger.getAnonymousLogger().log(Level.SEVERE, "Errore durante PMD per release {0}", releaseName + e.getMessage());
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private File findFirstJavaSourceDirectory(File root) {
+        Queue<File> queue = new LinkedList<>();
+        queue.add(root);
+
+        while (!queue.isEmpty()) {
+            File dir = queue.poll();
+            File[] files = dir.listFiles();
+            if (files == null) continue;
+
+            boolean hasJava = Arrays.stream(files)
+                    .anyMatch(f -> f.isFile() && f.getName().endsWith(".java"));
+
+            if (hasJava) {
+                return dir;
+            }
+
+            for (File f : files) {
+                if (f.isDirectory()) {
+                    queue.add(f);
+                }
+            }
+        }
+
+        return null; // Nessuna dir con file .java trovata
     }
 
     /**
@@ -85,32 +232,6 @@ public class GitExtraction {
         }
     }
 
-    public void analyzeReleaseCode(Release release) throws IOException {
-        if (release.getCommitList().isEmpty()) {
-            Logger.getAnonymousLogger().log(Level.WARNING, " Release {0} have 0 commit, code not be analyze.", release.getName());
-            return;
-        }
-
-        // Analizziamo lo stato del codice all'ultimo commit della release
-        RevCommit lastCommit = release.getCommitList().get(release.getCommitList().size() - 1);
-        RevTree tree = lastCommit.getTree();
-
-        Logger.getAnonymousLogger().log(Level.INFO, "Analisi codice per release {0} (commit: {1})", new Object[]{release.getName(), lastCommit.getId().getName()});
-
-        // Usiamo un TreeWalk per navigare nell'albero dei file del commit
-        try (TreeWalk treeWalk = new TreeWalk(git.getRepository())) {
-            treeWalk.addTree(tree);
-            treeWalk.setRecursive(true);
-
-            while (treeWalk.next()) {
-                String path = treeWalk.getPathString();
-                // Considera solo i file .java, ignorando i test
-                if (path.endsWith(".java") && !path.toLowerCase().contains("/test/")) {
-                    parseJavaFile(treeWalk, path, release);
-                }
-            }
-        }
-    }
 
     private boolean isSimpleGetterOrSetter(MethodDeclaration method) {
         // Un metodo senza corpo non è un getter/setter semplice (es. astratto)
