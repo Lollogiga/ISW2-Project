@@ -43,6 +43,7 @@ import java.util.stream.Collectors;
 
 public class GitExtraction {
 
+    private static final String JAVA_EXTENSION = ".java";
     private final Git git;
 
     public GitExtraction() throws IOException {
@@ -84,7 +85,7 @@ public class GitExtraction {
 
             while (treeWalk.next()) {
                 String path = treeWalk.getPathString();
-                if (path.endsWith(".java") && !path.toLowerCase().contains("/test/")) {
+                if (path.endsWith(JAVA_EXTENSION) && !path.toLowerCase().contains("/test/")) {
                     parseJavaFile(treeWalk, path, release);
                 }
             }
@@ -107,7 +108,7 @@ public class GitExtraction {
             for (File file : files) {
                 if (file.isDirectory()) {
                     dirs.add(file);
-                } else if (file.getName().endsWith(".java")
+                } else if (file.getName().endsWith(JAVA_EXTENSION)
                         && !file.getAbsolutePath().toLowerCase().contains(File.separator + "test" + File.separator)) {
                     javaFiles.add(file);
                 }
@@ -166,32 +167,6 @@ public class GitExtraction {
             Logger.getAnonymousLogger().log(Level.SEVERE, "Errore durante PMD per release {0}", releaseName + e.getMessage());
             Thread.currentThread().interrupt();
         }
-    }
-
-    private File findFirstJavaSourceDirectory(File root) {
-        Queue<File> queue = new LinkedList<>();
-        queue.add(root);
-
-        while (!queue.isEmpty()) {
-            File dir = queue.poll();
-            File[] files = dir.listFiles();
-            if (files == null) continue;
-
-            boolean hasJava = Arrays.stream(files)
-                    .anyMatch(f -> f.isFile() && f.getName().endsWith(".java"));
-
-            if (hasJava) {
-                return dir;
-            }
-
-            for (File f : files) {
-                if (f.isDirectory()) {
-                    queue.add(f);
-                }
-            }
-        }
-
-        return null; // Nessuna dir con file .java trovata
     }
 
     /**

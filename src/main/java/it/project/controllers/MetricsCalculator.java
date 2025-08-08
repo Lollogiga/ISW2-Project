@@ -38,31 +38,22 @@ public class MetricsCalculator {
         Map<String, Set<String>> previousAuthors = new HashMap<>();
 
         for (Release release : releases) {
-            File reportFile = new File(git.getRepository().getWorkTree(), "pmd-reports/pmd-" + release.getName() + ".xml");
-            Path repoRoot = git.getRepository().getWorkTree().toPath().toAbsolutePath();
-
-
-            Map<String, Set<String>> currentAuthors = new HashMap<>();
             Logger.getAnonymousLogger().log(Level.INFO, "Calcolo metriche per release {0}...", release.getName());
 
+            File reportFile = new File(git.getRepository().getWorkTree(), "pmd-reports/pmd-" + release.getName() + ".xml");
+            Path repoRoot = git.getRepository().getWorkTree().toPath().toAbsolutePath();
+            Map<String, Set<String>> currentAuthors = new HashMap<>();
+
             for (JavaClass javaClass : release.getJavaClassList()) {
+                String relativePath = javaClass.getPath();
+
                 for (JavaMethod javaMethod : javaClass.getMethods()) {
                     calculateMetricsForMethod(javaMethod, release.getCommitList(), previousAuthors, currentAuthors);
 
+                    // parseReport viene richiamato come nel codice originale
                     Map<String, List<Smell>> smellsMap = new PmdParser().parseReport(reportFile, repoRoot.toFile());
-
-                    String relativePath = javaClass.getPath();
-                    List<Smell> fileSmells = smellsMap.getOrDefault(relativePath, Collections.emptyList());
-
-                    int count = 0;
-                    for (Smell smell : fileSmells) {
-                        if (smell.getBeginLine() >= javaMethod.getStartLine() && smell.getBeginLine() <= javaMethod.getEndLine()) {
-                            count++;
-                        }
-                    }
-
-                    javaMethod.setnSmells(count);
-
+                    int nSmells = countSmellsForMethod(smellsMap.getOrDefault(relativePath, Collections.emptyList()), javaMethod);
+                    javaMethod.setnSmells(nSmells);
                 }
             }
 
@@ -70,24 +61,21 @@ public class MetricsCalculator {
         }
     }
 
+    private int countSmellsForMethod(List<Smell> smells, JavaMethod method) {
+        int count = 0;
+        int start = method.getStartLine();
+        int end = method.getEndLine();
 
-    private String getString(JavaClass javaClass, JavaMethod javaMethod) {
-        Path repoRoot = git.getRepository().getWorkTree().toPath().toAbsolutePath();
-        Path methodPath = new File(javaClass.getPath()).toPath().toAbsolutePath();
-
-        Path relativePath;
-        try {
-            relativePath = repoRoot.relativize(methodPath);
-        } catch (IllegalArgumentException e) {
-            // fallback: usa il path assoluto se i due path sono incompatibili
-            relativePath = methodPath;
+        for (Smell smell : smells) {
+            if (smell.getBeginLine() >= start && smell.getBeginLine() <= end) {
+                count++;
+            }
         }
 
-        String normalizedPath = relativePath.toString().replace("\\", "/");
-
-
-        return normalizedPath + "::" + javaMethod.getStartLine() + "-" + javaMethod.getEndLine();
+        return count;
     }
+
+
 
     private void calculateMetricsForMethod(JavaMethod method, List<RevCommit> commits,
                                            Map<String, Set<String>> previousAuthors,

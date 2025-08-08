@@ -12,7 +12,9 @@ public class PmdParser {
         Map<String, List<Smell>> fileToSmells = new HashMap<>();
 
         try {
-            Document doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(reportFile);
+            Document doc = DocumentBuilderFactory.newInstance()
+                    .newDocumentBuilder()
+                    .parse(reportFile);
             doc.getDocumentElement().normalize();
 
             NodeList fileNodes = doc.getElementsByTagName("file");
@@ -20,26 +22,30 @@ public class PmdParser {
             for (int i = 0; i < fileNodes.getLength(); i++) {
                 Element fileElement = (Element) fileNodes.item(i);
                 String absPath = fileElement.getAttribute("name");
-                File absFile = new File(absPath);
-                String relPath = repoRoot.toURI().relativize(absFile.toURI()).getPath();
+                String relPath = getRelativePath(repoRoot, absPath);
 
                 NodeList violations = fileElement.getElementsByTagName("violation");
 
                 for (int j = 0; j < violations.getLength(); j++) {
-                    Element v = (Element) violations.item(j);
-                    int begin = Integer.parseInt(v.getAttribute("beginline"));
-                    int end = Integer.parseInt(v.getAttribute("endline"));
+                    Element violation = (Element) violations.item(j);
+                    int begin = Integer.parseInt(violation.getAttribute("beginline"));
+                    int end = Integer.parseInt(violation.getAttribute("endline"));
 
                     fileToSmells
                             .computeIfAbsent(relPath, k -> new ArrayList<>())
                             .add(new Smell(begin, end));
                 }
             }
-
         } catch (Exception e) {
-            e.printStackTrace();
+            // Log in modo più pulito ed evitabile in produzione
+            System.err.println("PMD parsing error: " + e.getMessage());
         }
 
         return fileToSmells;
+    }
+
+    private String getRelativePath(File repoRoot, String absPath) {
+        File absFile = new File(absPath);
+        return repoRoot.toURI().relativize(absFile.toURI()).getPath();
     }
 }
