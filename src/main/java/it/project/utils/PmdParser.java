@@ -5,6 +5,8 @@ import org.w3c.dom.*;
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.File;
 import java.util.*;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class PmdParser {
 
@@ -37,8 +39,8 @@ public class PmdParser {
                 }
             }
         } catch (Exception e) {
-            // Log in modo più pulito ed evitabile in produzione
-            System.err.println("PMD parsing error: " + e.getMessage());
+            Logger.getAnonymousLogger().log(Level.SEVERE, "PMD parsing error: {0}", e.getMessage());
+
         }
 
         return fileToSmells;
