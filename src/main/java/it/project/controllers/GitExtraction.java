@@ -45,9 +45,11 @@ public class GitExtraction {
 
     private static final String JAVA_EXTENSION = ".java";
     private final Git git;
+    private final String pmdPath;
 
-    public GitExtraction() throws IOException {
+    public GitExtraction(String pmdPath) throws IOException {
         this.git = RepoFactory.getGit();
+        this.pmdPath = pmdPath;
     }
 
 
@@ -145,7 +147,7 @@ public class GitExtraction {
             Logger.getAnonymousLogger().log(Level.INFO, "PMD analizzerà {0} file.", javaFiles.size());
 
             ProcessBuilder pb = new ProcessBuilder(
-                    "/opt/homebrew/bin/pmd",
+                    pmdPath,
                     "check",
                     "-d", fileList,
                     "-R", "category/java/bestpractices.xml",

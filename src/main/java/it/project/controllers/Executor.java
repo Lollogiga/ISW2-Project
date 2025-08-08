@@ -20,7 +20,7 @@ public class Executor {
     private Executor() {
     }
 
-    public static void dataExtraction(String projectName) throws IOException {
+    public static void dataExtraction(String projectName, String pmdPath) throws IOException {
         JiraExtraction jira = new JiraExtraction(projectName);
         FileCSVGenerator csv = new FileCSVGenerator(DIRECTORY, projectName);
 
@@ -44,7 +44,7 @@ public class Executor {
         TicketUtils.fixInconsistentTickets(ticketList, releaseList);
 
         //Extraction from git:
-        GitExtraction gitExtraction = new GitExtraction();
+        GitExtraction gitExtraction = new GitExtraction(pmdPath);
         try{
             gitExtraction.associateCommitsToReleases(releaseList);
         }catch (GitAPIException e){

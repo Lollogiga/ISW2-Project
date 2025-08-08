@@ -19,12 +19,13 @@ public class Main {
 
         String projectName = prop.getProperty("PROJECT_NAME");
         String skipExtractionProp = prop.getProperty("SKIP_EXTRACTION");
+        String pmdPath = prop.getProperty("PMD_PATH");
 
         boolean skipExtraction = skipExtractionProp != null && skipExtractionProp.equalsIgnoreCase("true");
 
         if (!skipExtraction) {
             try {
-                Executor.dataExtraction(projectName);
+                Executor.dataExtraction(projectName, pmdPath);
             } catch (Exception e) {
                 Logger.getAnonymousLogger().log(Level.INFO, String.format("Error during program execution flow %s", e));
             }
