@@ -145,7 +145,7 @@ public class GitExtraction {
             Logger.getAnonymousLogger().log(Level.INFO, "PMD analizzerà {0} file.", javaFiles.size());
 
             ProcessBuilder pb = new ProcessBuilder(
-                    "pmd",
+                    "/opt/homebrew/bin/pmd",
                     "check",
                     "-d", fileList,
                     "-R", "category/java/bestpractices.xml",
