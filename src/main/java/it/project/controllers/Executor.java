@@ -2,6 +2,7 @@ package it.project.controllers;
 
 import it.project.entities.Release;
 import it.project.entities.Ticket;
+import it.project.utils.FileARFFGenerator;
 import it.project.utils.FileCSVGenerator;
 import it.project.utils.TicketUtils;
 import org.eclipse.jgit.api.Git;
@@ -23,7 +24,6 @@ public class Executor {
     public static void dataExtraction(String projectName, String pmdPath) throws IOException {
         JiraExtraction jira = new JiraExtraction(projectName);
         FileCSVGenerator csv = new FileCSVGenerator(DIRECTORY, projectName);
-
 
         List<Release> releaseList = jira.getReleaseInfo();
         Logger.getAnonymousLogger().log(Level.INFO, "Data extraction: Releases List");
@@ -122,7 +122,7 @@ public class Executor {
         /*Walk forward*/
         try {
             Git gitInstance = it.project.utils.RepoFactory.getGit();
-            WalkForward walkForward = new WalkForward(releaseList, ticketList, csv, gitInstance);
+            WalkForward walkForward = new WalkForward(projectName, releaseList, ticketList, csv, gitInstance);
             walkForward.execute();
         } catch (IOException e) {
             Logger.getAnonymousLogger().log(Level.SEVERE, "An error occurred during the Walk-Forward process", e);

@@ -2,6 +2,7 @@ package it.project.controllers;
 
 import it.project.entities.Release;
 import it.project.entities.Ticket;
+import it.project.utils.FileARFFGenerator;
 import it.project.utils.FileCSVGenerator;
 import org.eclipse.jgit.api.Git;
 
@@ -12,12 +13,14 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public class WalkForward {
+    private final String projectName;
     private final List<Release> fullReleaseList;
     private final List<Ticket> fullTicketList;
     private final FileCSVGenerator csvGenerator;
     private final Buggyness buggyness;
 
-    public WalkForward(List<Release> releases, List<Ticket> tickets, FileCSVGenerator csvGenerator, Git git){
+    public WalkForward(String projectName, List<Release> releases, List<Ticket> tickets, FileCSVGenerator csvGenerator, Git git){
+        this.projectName = projectName;
         this.fullReleaseList = releases;
         this.fullTicketList = tickets;
         this.csvGenerator = csvGenerator;
@@ -51,8 +54,16 @@ public class WalkForward {
             //3. Labelling for training set
             buggyness.calculate(trainingReleases, trainingTickets);
 
-            //4. Write training set on csve file
+            //4. Write training set on csv file
             csvGenerator.generateTrainingSet(trainingReleases, i);
+
+            try {
+                FileARFFGenerator arffGen = new FileARFFGenerator(projectName, i);
+                arffGen.csvToARFFTraining();
+            } catch (Exception e) {
+                Logger.getAnonymousLogger().log(Level.SEVERE, "Errore conversione ARFF (training) iter " + i, e);
+
+            }
 
             //Testing:
             //1. Select releases for training:
@@ -72,6 +83,15 @@ public class WalkForward {
 
             //3. Write testing set on csv file
             csvGenerator.generateTestingSet(testingReleaseList, i);
+
+            // CONVERSIONE CSV -> ARFF (testing)
+            try {
+               FileARFFGenerator arffGen = new FileARFFGenerator(projectName, i);
+                arffGen.csvToARFFTesting();
+            } catch (Exception e) {
+                Logger.getAnonymousLogger().log(Level.SEVERE, "Errore conversione ARFF (testing) iter " + i, e);
+
+            }
         }
         Logger.getAnonymousLogger().log(Level.INFO, "Finished walk forward...");
     }
