@@ -2,7 +2,6 @@ package it.project.controllers;
 
 import it.project.entities.Release;
 import it.project.entities.Ticket;
-import it.project.utils.FileARFFGenerator;
 import it.project.utils.FileCSVGenerator;
 import it.project.utils.TicketUtils;
 import org.eclipse.jgit.api.Git;
@@ -15,10 +14,10 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
-public class Executor {
+public class DatasetCreation {
     private static final String DIRECTORY = "src/main/resources/";
 
-    private Executor() {
+    private DatasetCreation() {
     }
 
     public static void dataExtraction(String projectName, String pmdPath) throws IOException {

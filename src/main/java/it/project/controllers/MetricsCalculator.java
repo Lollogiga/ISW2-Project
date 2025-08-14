@@ -117,7 +117,7 @@ public class MetricsCalculator {
         method.setChurn(totalChurn);
         method.setLocAdded(locAdded);
         method.setnAuth(authors.size());
-        method.setWeekendCommitRatio(totalCommitsForMethod > 0 ? (double) weekendCommits / totalCommitsForMethod : 0.0);
+        method.setWeekendCommit(totalCommitsForMethod > 0 ? (double) weekendCommits / totalCommitsForMethod : 0.0);
 
         // Calcolo Newcomer Risk
         String methodId = filePath + "::" + method.getName();

@@ -1,0 +1,10 @@
+feature	count
+ isBuggy	4
+ nSmell	4
+WeekendCommit	3
+LOC	3
+Auth	3
+LocAdded	3
+Churn	2
+CyclomaticComplexity	1
+NewcomerRisk	1

@@ -17,7 +17,7 @@ public class JavaMethod {
     private int locAdded;
     private double newcomerRisk;
     private int nAuth;
-    private double weekendCommitRatio;
+    private double weekendCommit;
     private int nSmells;
     private boolean isBuggy;
 
@@ -38,7 +38,7 @@ public class JavaMethod {
         this.locAdded = 0;
         this.newcomerRisk = 0.0;
         this.nAuth = 0;
-        this.weekendCommitRatio = 0.0;
+        this.weekendCommit = 0.0;
         this.nSmells = 0;
     }
 
@@ -126,12 +126,12 @@ public class JavaMethod {
         this.nAuth = nAuth;
     }
 
-    public double getWeekendCommitRatio() {
-        return weekendCommitRatio;
+    public int getWeekendCommit() {
+        return weekendCommit>0 ? 1 : 0;
     }
 
-    public void setWeekendCommitRatio(double weekendCommitRatio) {
-        this.weekendCommitRatio = weekendCommitRatio;
+    public void setWeekendCommit(double weekendCommit) {
+        this.weekendCommit = weekendCommit;
     }
 
     public String isBuggy() {

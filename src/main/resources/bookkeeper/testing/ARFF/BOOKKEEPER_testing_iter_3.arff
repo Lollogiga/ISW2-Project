@@ -6,7 +6,7 @@
 @attribute LocAdded numeric
 @attribute NewcomerRisk numeric
 @attribute Auth numeric
-@attribute WeekendCommitRatio numeric
+@attribute WeekendCommit numeric
 @attribute ' nSmell' numeric
 @attribute ' isBuggy' {No,Yes}
 

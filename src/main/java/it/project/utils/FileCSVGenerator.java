@@ -149,7 +149,7 @@ public class FileCSVGenerator {
             fileWriter = new FileWriter(fileTitle);
 
             // 1. Modifica l'intestazione per usare "Release_Index" e metterlo per primo.
-            String header = "Release_Index,MethodName,LOC,Parameters_Count,Fan_Out,Cyclomatic_Complexity,LCOM,Churn,LOC_Added,Newcomer_Risk,n_Auth,Weekend_Commit_Ratio,isBuggy";
+            String header = "Release_Index,MethodName,LOC,Parameters_Count,Fan_Out,Cyclomatic_Complexity,LCOM,Churn,LOC_Added,Newcomer_Risk,n_Auth,Weekend_Commit,isBuggy";
             writeToFile(fileWriter, header);
 
             Logger.getAnonymousLogger().log(Level.INFO, "Generazione dataset in corso... {0}", fileTitle);
@@ -172,7 +172,7 @@ public class FileCSVGenerator {
                                 String.valueOf(javaMethod.getLocAdded()),
                                 String.valueOf(javaMethod.getNewcomerRisk()),
                                 String.valueOf(javaMethod.getnAuth()),
-                                String.valueOf(javaMethod.getWeekendCommitRatio()),
+                                String.valueOf(javaMethod.getWeekendCommit()),
                                 String.valueOf(javaMethod.getnSmells()),
                                 // 3. Correzione: Converti il booleano 'isBuggy' in una stringa "YES" o "NO"
                                 javaMethod.isBuggy()
@@ -246,7 +246,7 @@ public class FileCSVGenerator {
             fileWriter = new FileWriter(filePath);
 
             // Intestazione del CSV
-            writeToFile(fileWriter, "Index,MethodName,LOC,CyclomaticComplexity,Churn,LocAdded,NewcomerRisk,Auth,WeekendCommitRatio, nSmell, isBuggy");
+            writeToFile(fileWriter, "Index,MethodName,LOC,CyclomaticComplexity,Churn,LocAdded,NewcomerRisk,Auth,WeekendCommit, nSmell, isBuggy");
 
             for (Release release : releases) {
                 for (JavaClass jc : release.getJavaClassList()) {
@@ -260,7 +260,7 @@ public class FileCSVGenerator {
                                 String.valueOf(jm.getLocAdded()),
                                 String.valueOf(jm.getNewcomerRisk()),
                                 String.valueOf(jm.getnAuth()),
-                                String.valueOf(jm.getWeekendCommitRatio()),
+                                String.valueOf(jm.getWeekendCommit()),
                                 String.valueOf(jm.getnSmells()),
                                 jm.isBuggy()
                         );

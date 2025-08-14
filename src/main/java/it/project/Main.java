@@ -1,5 +1,7 @@
 package it.project;
-import it.project.controllers.Executor;
+import it.project.controllers.DatasetCreation;
+import it.project.controllers.PredictionPipeline;
+import it.project.utils.SpearmanCorrelation;
 
 import java.io.*;
 import java.util.Properties;
@@ -19,18 +21,25 @@ public class Main {
 
         String projectName = prop.getProperty("PROJECT_NAME");
         String skipExtractionProp = prop.getProperty("SKIP_EXTRACTION");
+        String outputDir = prop.getProperty("OUTPUT_DIR");
         String pmdPath = prop.getProperty("PMD_PATH");
 
         boolean skipExtraction = skipExtractionProp != null && skipExtractionProp.equalsIgnoreCase("true");
 
         if (!skipExtraction) {
             try {
-                Executor.dataExtraction(projectName, pmdPath);
+                DatasetCreation.dataExtraction(projectName, pmdPath);
             } catch (Exception e) {
                 Logger.getAnonymousLogger().log(Level.INFO, String.format("Error during program execution flow %s", e));
             }
-        } else {
-            Logger.getAnonymousLogger().log(Level.INFO, "Skipping feature extraction: using existing data.");
         }
+        //new SpearmanCorrelation(outputDir, projectName).run();
+        new PredictionPipeline(
+                "src/main/resources/",   // baseDir
+                projectName,             // es. "BookKeeper"
+                0.80,                    // soglia |rho| per correlation filter
+                false                    // true per usare J48 al posto di NaiveBayes
+        ).run();
+
     }
 }
