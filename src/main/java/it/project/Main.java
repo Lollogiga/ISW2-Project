@@ -1,6 +1,7 @@
 package it.project;
 import it.project.controllers.DatasetCreation;
 import it.project.controllers.PredictionPipeline;
+import it.project.controllers.WekaClassifier;
 import it.project.utils.SpearmanCorrelation;
 
 import java.io.*;
@@ -10,7 +11,7 @@ import java.util.logging.Logger;
 
 public class Main {
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         Properties prop = new Properties();
 
         try (InputStream input = new FileInputStream("src/main/resources/configuration.properties")) {
@@ -34,12 +35,7 @@ public class Main {
             }
         }
         //new SpearmanCorrelation(outputDir, projectName).run();
-        new PredictionPipeline(
-                "src/main/resources/",   // baseDir
-                projectName,             // es. "BookKeeper"
-                0.80,                    // soglia |rho| per correlation filter
-                false                    // true per usare J48 al posto di NaiveBayes
-        ).run();
+        new WekaClassifier(projectName).fetchWekaAnalysis();
 
     }
 }

@@ -1,10 +1,7 @@
 package it.project.utils;
 
 
-import it.project.entities.Release;
-import it.project.entities.JavaClass;
-import it.project.entities.JavaMethod;
-import it.project.entities.Ticket;
+import it.project.entities.*;
 
 import java.io.File;
 import java.io.FileWriter;
@@ -12,10 +9,13 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
+
 
 public class FileCSVGenerator {
     private final String directoryPath;
@@ -30,7 +30,8 @@ public class FileCSVGenerator {
     private static final String TESTING_CSV = TESTING + "CSV" + File.separator;
     private static final String TESTING_ARFF = TESTING + "ARFF" + File.separator;
     private static final String RESULT = "result" + File.separator;
-    private static final String ACUME = "acumeFiles" + File.separator;
+    private static final String PREDICTION = "prediction" + File.separator;
+
 
     public FileCSVGenerator(String directoryPath, String projName) throws IOException {
         this.projName = projName;
@@ -46,7 +47,7 @@ public class FileCSVGenerator {
                 TESTING_CSV,
                 TESTING_ARFF,
                 RESULT,
-                ACUME
+                PREDICTION
         };
 
         createDirectories(subPaths);
@@ -287,5 +288,111 @@ public class FileCSVGenerator {
         Logger.getAnonymousLogger().log(Level.INFO, "Generating Testing Set: {0}", filePath);
         generateDatasetFile(releases, filePath);
     }
+
+    public void generatePredictionsFile(List<String[]> rows,
+                                        String classifierName,
+                                        String featureSelection,
+                                        int iteration) {
+        String safeFS = toSafeSlug(featureSelection);
+        String dir = this.directoryPath + projName.toLowerCase() + PREDICTION;
+        String fileName = String.format("%s_predictions_iter_%d_%s_%s.csv",
+                projName, iteration, toSafeSlug(classifierName), safeFS);
+
+        ensureDir(dir);
+        File out = new File(dir, fileName);
+
+        try (FileWriter fw = new FileWriter(out)) {
+            for (String[] r : rows) fw.write(csvLine(r));
+            Logger.getAnonymousLogger().log(Level.INFO, "Scritto file di predizioni: {0}", out.getAbsolutePath());
+        } catch (IOException e) {
+            Logger.getAnonymousLogger().log(Level.SEVERE, "Errore scrittura predizioni: " + e.getMessage(), e);
+        }
+    }
+
+    public void generateWekaResultFile(List<ClassifierResults> classifierResultsList, int iteration) {
+        Map<String, List<ClassifierResults>> groups = classifierResultsList.stream()
+                .collect(Collectors.groupingBy(res ->
+                        key(res.getClassifierName(), res.isSelection())
+                ));
+
+        String dir = this.directoryPath + projName.toLowerCase() + RESULT;
+
+        String fileName;
+        if(iteration != 0) {
+            fileName = String.format("%s_results_iter_%d.csv", projName, iteration);
+        }else {
+            fileName = String.format("%s_weka_metrics_aggregate.csv", projName);
+        }
+        ensureDir(dir);
+        File out = new File(dir, fileName);
+
+        try (FileWriter fw = new FileWriter(out)) {
+            fw.write(csvLine(new String[]{
+                    "classifier","feature_selection","iterations",
+                    "avg_recall","avg_precision","avg_f1","avg_auc","avg_kappa",
+                    "sum_tp","sum_fp","sum_tn","sum_fn"
+            }));
+
+            for (Map.Entry<String, List<ClassifierResults>> e : groups.entrySet()) {
+                String[] parts = e.getKey().split("\\|", -1);
+                String clf = parts[0];
+                String featSel = parts.length > 1 ? parts[1] : "";
+
+                List<ClassifierResults> list = e.getValue();
+                int n = list.size();
+
+                double avgRec = list.stream().mapToDouble(ClassifierResults::getRec).average().orElse(Double.NaN);
+                double avgPre = list.stream().mapToDouble(ClassifierResults::getPreci).average().orElse(Double.NaN);
+                double avgF1  = list.stream().mapToDouble(ClassifierResults::getFMeasure).average().orElse(Double.NaN);
+                double avgAuc = list.stream().mapToDouble(ClassifierResults::getAuc).average().orElse(Double.NaN);
+                double avgKap = list.stream().mapToDouble(ClassifierResults::getKappa).average().orElse(Double.NaN);
+
+                long sumTP = Math.round(list.stream().mapToDouble(ClassifierResults::getTruePositives).sum());
+                long sumFP = Math.round(list.stream().mapToDouble(ClassifierResults::getFalsePositives).sum());
+                long sumTN = Math.round(list.stream().mapToDouble(ClassifierResults::getTrueNegatives).sum());
+                long sumFN = Math.round(list.stream().mapToDouble(ClassifierResults::getFalseNegatives).sum());
+
+                fw.write(csvLine(new String[]{
+                        clf, featSel, String.valueOf(n),
+                        String.valueOf(avgRec), String.valueOf(avgPre), String.valueOf(avgF1),
+                        String.valueOf(avgAuc), String.valueOf(avgKap),
+                        String.valueOf(sumTP), String.valueOf(sumFP),
+                        String.valueOf(sumTN), String.valueOf(sumFN)
+                }));
+            }
+
+            Logger.getAnonymousLogger().log(Level.INFO, "Scritto file aggregato: {0}", out.getAbsolutePath());
+        } catch (IOException ex) {
+            Logger.getAnonymousLogger().log(Level.SEVERE, "Errore scrittura aggregato: " + ex.getMessage(), ex);
+        }
+    }
+    private String key(String classifierName, String featSel) {
+        return (classifierName == null ? "" : classifierName) + "|" + (featSel == null ? "" : featSel);
+    }
+
+    private String csvLine(String[] cols) {
+        return Arrays.stream(cols).map(this::csvEscape).collect(Collectors.joining(",")) + "\n";
+    }
+
+    private String csvEscape(String s) {
+        if (s == null) return "";
+        String z = s.replace("\"", "\"\"");
+        return "\"" + z + "\"";
+    }
+
+    private void ensureDir(String dirPath) {
+        try {
+            Files.createDirectories(new File(dirPath).toPath());
+        } catch (IOException e) {
+            Logger.getAnonymousLogger().log(Level.SEVERE, "Impossibile creare directory " + dirPath + ": " + e.getMessage(), e);
+        }
+    }
+
+    private String toSafeSlug(String s) {
+        if (s == null || s.isBlank()) return "base";
+        return s.toLowerCase().replaceAll("[^a-z0-9]+", "-");
+    }
+
+
 
 }

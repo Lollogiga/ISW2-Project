@@ -1,7 +1,0 @@
-# backward - WrapperSubsetEval(AUC) + GreedyStepwise
-index	name
-0	LocAdded
-1	Auth
-2	WeekendCommit
-3	 nSmell
-4	 isBuggy
