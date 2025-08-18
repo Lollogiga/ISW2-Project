@@ -6,7 +6,6 @@ import it.project.utils.FileCSVGenerator;
 import it.project.utils.TicketUtils;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.errors.GitAPIException;
-
 import java.io.IOException;
 import java.util.Comparator;
 import java.util.List;
@@ -131,6 +130,5 @@ public class DatasetCreation {
 
 
     }
-
 
 }

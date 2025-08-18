@@ -16,6 +16,9 @@ public class ClassifierResults {
     private double auc;
     private double fMeasure;
 
+    private Double pofB20;   // può essere null/NaN se non calcolabile
+    private Double npofB20;  // idem
+
     private final String selection;
 
     public ClassifierResults(String projName, int index, String classifierName, ClassifierSettings settings, int trainInstances, int testInstances) {
@@ -119,6 +122,12 @@ public class ClassifierResults {
     public double getKappa() {
         return kappa;
     }
+
+    public Double getPofB20() { return pofB20; }
+    public void setPofB20(Double pofB20) { this.pofB20 = pofB20; }
+
+    public Double getNpofB20() { return npofB20; }
+    public void setNpofB20(Double npofB20) { this.npofB20 = npofB20; }
 
     public double getPercTrainingInstances() {
         return percTrainingInstances;

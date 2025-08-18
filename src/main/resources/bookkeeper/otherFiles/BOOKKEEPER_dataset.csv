@@ -1,4 +1,4 @@
-Release_Index,MethodName,LOC,Parameters_Count,Fan_Out,Cyclomatic_Complexity,LCOM,Churn,LOC_Added,Newcomer_Risk,n_Auth,Weekend_Commit,isBuggy
+Release_Index,MethodName,LOC,Parameters_Count,Fan_Out,Cyclomatic_Complexity,LCOM,Churn,LOC_Added,Newcomer_Risk,n_Auth,Weekend_Commit,numSmell,isBuggy
 1,bookkeeper-benchmark/src/main/java/org/apache/bookkeeper/benchmark/MySqlClient.java::closeHandle,3,0,1,1,4,179,168,1.0,2,0,0,No
 1,bookkeeper-benchmark/src/main/java/org/apache/bookkeeper/benchmark/MySqlClient.java::writeSameEntryBatch,14,2,5,2,4,172,171,1.0,2,0,3,No
 1,bookkeeper-benchmark/src/main/java/org/apache/bookkeeper/benchmark/MySqlClient.java::writeSameEntry,11,2,4,2,4,172,171,1.0,2,0,2,No

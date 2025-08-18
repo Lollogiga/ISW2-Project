@@ -19,6 +19,9 @@ public class JavaMethod {
     private int nAuth;
     private double weekendCommit;
     private int nSmells;
+    private int fanIn;
+
+
     private boolean isBuggy;
 
     public JavaMethod(String name, String content, Release release, int startLine, int endLine) {
@@ -150,7 +153,11 @@ public class JavaMethod {
         this.nSmells = nSmells;
     }
 
+    public int getFanIn() { return fanIn; }
+    public void setFanIn(int fanIn) { this.fanIn = fanIn; }
+
     public void setBuggy(boolean b) {
         this.isBuggy = b;
     }
+
 }

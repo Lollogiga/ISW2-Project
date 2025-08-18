@@ -154,7 +154,7 @@ public class FileCSVGenerator {
             fileWriter = new FileWriter(fileTitle);
 
             // 1. Modifica l'intestazione per usare "Release_Index" e metterlo per primo.
-            String header = "Release_Index,MethodName,LOC,Parameters_Count,Fan_Out,Cyclomatic_Complexity,LCOM,Churn,LOC_Added,Newcomer_Risk,n_Auth,Weekend_Commit,isBuggy";
+            String header = "Release_Index,MethodName,LOC,Parameters_Count,Fan_Out,Cyclomatic_Complexity,LCOM,Churn,LOC_Added,Newcomer_Risk,n_Auth,Weekend_Commit,numSmell,isBuggy";
             writeToFile(fileWriter, header);
 
             Logger.getAnonymousLogger().log(Level.INFO, "Generazione dataset in corso... {0}", fileTitle);
@@ -251,7 +251,7 @@ public class FileCSVGenerator {
             fileWriter = new FileWriter(filePath);
 
             // Intestazione del CSV
-            writeToFile(fileWriter, "Index,MethodName,LOC,CyclomaticComplexity,Churn,LocAdded,NewcomerRisk,Auth,WeekendCommit, nSmell, isBuggy");
+            writeToFile(fileWriter, "Index,MethodName,LOC,CyclomaticComplexity,Churn,LocAdded,fan-in,fan-out, NewcomerRisk,Auth,WeekendCommit, nSmell, isBuggy");
 
             for (Release release : releases) {
                 for (JavaClass jc : release.getJavaClassList()) {
@@ -263,6 +263,8 @@ public class FileCSVGenerator {
                                 String.valueOf(jm.getCyclomaticComplexity()),
                                 String.valueOf(jm.getChurn()),
                                 String.valueOf(jm.getLocAdded()),
+                                String.valueOf(jm.getFanIn()),
+                                String.valueOf(jm.getFanOut()),
                                 String.valueOf(jm.getNewcomerRisk()),
                                 String.valueOf(jm.getnAuth()),
                                 String.valueOf(jm.getWeekendCommit()),
@@ -314,27 +316,28 @@ public class FileCSVGenerator {
     }
 
     public void generateWekaResultFile(List<ClassifierResults> classifierResultsList, int iteration) {
+        // Raggruppa per (classifier | feature_selection_on/off)
         Map<String, List<ClassifierResults>> groups = classifierResultsList.stream()
-                .collect(Collectors.groupingBy(res ->
-                        key(res.getClassifierName(), res.isSelection())
-                ));
+                .collect(Collectors.groupingBy(res -> key(res.getClassifierName(), res.isSelection())));
 
         String dir = this.directoryPath + RESULT;
 
         String fileName;
-        if(iteration != 0) {
+        if (iteration != 0) {
             fileName = String.format("%s_results_iter_%d.csv", projName, iteration);
-        }else {
+        } else {
             fileName = String.format("%s_weka_metrics_aggregate.csv", projName);
         }
         ensureDir(dir);
         File out = new File(dir, fileName);
 
         try (FileWriter fw = new FileWriter(out)) {
+            // Header con PofB20 / NPofB20
             fw.write(csvLine(new String[]{
                     "classifier","feature_selection","iterations",
                     "avg_recall","avg_precision","avg_f1","avg_auc","avg_kappa",
-                    "sum_tp","sum_fp","sum_tn","sum_fn"
+                    "sum_tp","sum_fp","sum_tn","sum_fn",
+                    "avg_pofb20","avg_npofb20"
             }));
 
             for (Map.Entry<String, List<ClassifierResults>> e : groups.entrySet()) {
@@ -345,6 +348,7 @@ public class FileCSVGenerator {
                 List<ClassifierResults> list = e.getValue();
                 int n = list.size();
 
+                // Medie classiche
                 double avgRec = list.stream().mapToDouble(ClassifierResults::getRec).average().orElse(Double.NaN);
                 double avgPre = list.stream().mapToDouble(ClassifierResults::getPreci).average().orElse(Double.NaN);
                 double avgF1  = list.stream().mapToDouble(ClassifierResults::getFMeasure).average().orElse(Double.NaN);
@@ -356,12 +360,17 @@ public class FileCSVGenerator {
                 long sumTN = Math.round(list.stream().mapToDouble(ClassifierResults::getTrueNegatives).sum());
                 long sumFN = Math.round(list.stream().mapToDouble(ClassifierResults::getFalseNegatives).sum());
 
+                // Medie effort-aware (gestione null/NaN)
+                double avgPofB20 = averageNullable(list, ClassifierResults::getPofB20);
+                double avgNPofB20 = averageNullable(list, ClassifierResults::getNpofB20);
+
                 fw.write(csvLine(new String[]{
                         clf, featSel, String.valueOf(n),
-                        String.valueOf(avgRec), String.valueOf(avgPre), String.valueOf(avgF1),
-                        String.valueOf(avgAuc), String.valueOf(avgKap),
+                        formatOrNaN(avgRec), formatOrNaN(avgPre), formatOrNaN(avgF1),
+                        formatOrNaN(avgAuc), formatOrNaN(avgKap),
                         String.valueOf(sumTP), String.valueOf(sumFP),
-                        String.valueOf(sumTN), String.valueOf(sumFN)
+                        String.valueOf(sumTN), String.valueOf(sumFN),
+                        formatOrNaN(avgPofB20), formatOrNaN(avgNPofB20)
                 }));
             }
 
@@ -370,6 +379,26 @@ public class FileCSVGenerator {
             Logger.getAnonymousLogger().log(Level.SEVERE, "Errore scrittura aggregato: " + ex.getMessage(), ex);
         }
     }
+
+    private static String formatOrNaN(Double d) {
+        if (d == null) return "NaN";
+        if (d.isNaN()) return "NaN";
+        return String.format(java.util.Locale.US, "%.4f", d);
+    }
+
+    private static <T> double averageNullable(List<T> list, java.util.function.Function<T, Double> getter) {
+        // media su valori non-null e non-NaN; se nessuno disponibile -> NaN
+        double[] arr = list.stream()
+                .map(getter)
+                .filter(v -> v != null && !v.isNaN())
+                .mapToDouble(Double::doubleValue)
+                .toArray();
+        if (arr.length == 0) return Double.NaN;
+        double sum = 0.0;
+        for (double v : arr) sum += v;
+        return sum / arr.length;
+    }
+
     private String key(String classifierName, String featSel) {
         return (classifierName == null ? "" : classifierName) + "|" + (featSel == null ? "" : featSel);
     }
@@ -460,6 +489,34 @@ public class FileCSVGenerator {
     private String toSafeSlug(String s) {
         if (s == null || s.isBlank()) return "base";
         return s.toLowerCase().replaceAll("[^a-z0-9]+", "-");
+    }
+
+    public void saveFeaturesCorrelationRanking(List<WekaClassifier.FeatureScore> scores) {
+        String fileTitle = this.directoryPath + OTHERFILES +
+                this.projName + "_featuresCorrelationWithBuggyness.csv";
+
+        try (FileWriter fw = new FileWriter(fileTitle)) {
+            // Intestazione
+            fw.write(csvLine(new String[]{"rank","attribute_name","attribute_index","score"}));
+
+            int rank = 1;
+            for (WekaClassifier.FeatureScore fs : scores) {
+                fw.write(csvLine(new String[]{
+                        String.valueOf(rank),
+                        fs.name,
+                        String.valueOf(fs.index),
+                        String.format("%.6f", fs.score) // formattato a 6 decimali
+                }));
+                rank++;
+            }
+
+            Logger.getAnonymousLogger().log(Level.INFO,
+                    "Salvato ranking correlazione feature-buggyness in: {0}", fileTitle);
+
+        } catch (IOException e) {
+            Logger.getAnonymousLogger().log(Level.SEVERE,
+                    "Errore durante il salvataggio del ranking correlazione feature-buggyness", e);
+        }
     }
 
 

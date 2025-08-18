@@ -1,6 +1,5 @@
 package it.project;
 import it.project.controllers.DatasetCreation;
-import it.project.controllers.PredictionPipeline;
 import it.project.controllers.WekaClassifier;
 import it.project.utils.SpearmanCorrelation;
 
@@ -44,9 +43,6 @@ public class Main {
         }else{
             path += outputPath + "training/ARFF/OPENJPA_training_iter_4.arff";
         }
-
-
-
-
+        WekaClassifier.runAndSaveFeatureCorrelationRanking(path, projectName, 0);
     }
 }
