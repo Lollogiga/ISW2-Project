@@ -57,11 +57,14 @@ public class WalkForward {
             //4. Write training set on csv file
             csvGenerator.generateTrainingSet(trainingReleases, i);
 
+            int iteration = i;
             try {
                 FileARFFGenerator arffGen = new FileARFFGenerator(projectName, i);
                 arffGen.csvToARFFTraining();
             } catch (Exception e) {
-                Logger.getAnonymousLogger().log(Level.SEVERE, "Errore conversione ARFF (training) iter " + i, e);
+                Logger.getAnonymousLogger().log(Level.SEVERE,
+                        () -> "Errore conversione ARFF (training) iter " + iteration);
+                Logger.getAnonymousLogger().log(Level.SEVERE, "Stacktrace:", e);
 
             }
 
@@ -86,11 +89,12 @@ public class WalkForward {
 
             // CONVERSIONE CSV -> ARFF (testing)
             try {
-               FileARFFGenerator arffGen = new FileARFFGenerator(projectName, i);
+                FileARFFGenerator arffGen = new FileARFFGenerator(projectName, iteration);
                 arffGen.csvToARFFTesting();
             } catch (Exception e) {
-                Logger.getAnonymousLogger().log(Level.SEVERE, "Errore conversione ARFF (testing) iter " + i, e);
-
+                Logger.getAnonymousLogger().log(Level.SEVERE,
+                        () -> "Errore conversione ARFF (testing) iter " + iteration);
+                Logger.getAnonymousLogger().log(Level.SEVERE, "Stacktrace:", e);
             }
         }
         Logger.getAnonymousLogger().log(Level.INFO, "Finished walk forward...");
