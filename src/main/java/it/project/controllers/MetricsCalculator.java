@@ -1,9 +1,11 @@
 package it.project.controllers;
 
+import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.resolution.declarations.ResolvedMethodDeclaration;
 import com.github.javaparser.symbolsolver.JavaSymbolSolver;
@@ -244,8 +246,13 @@ public class MetricsCalculator {
                 new ReflectionTypeSolver(false),
                 new JavaParserTypeSolver(repoRoot.toFile())
         );
-        StaticJavaParser.getConfiguration().setSymbolResolver(new JavaSymbolSolver(typeSolver));
+
+        ParserConfiguration parserConfiguration = new ParserConfiguration()
+                .setSymbolResolver(new JavaSymbolSolver(typeSolver));
+
+        StaticJavaParser.setConfiguration(parserConfiguration);
     }
+
 
     // ------------------------------------------------------------
 // STEP 3: prima passata - indice dichiarazioni
@@ -253,16 +260,17 @@ public class MetricsCalculator {
     private Map<String, String> buildDeclarationIndex(Path repoRoot, Set<Path> filesToParse) {
         Map<String, String> declIndex = new HashMap<>();
         for (Path p : filesToParse) {
-            if (!safeIsJavaFile(p)) continue;
-
-            CompilationUnit cu = parseQuietly(p);
-            if (cu == null) continue;
-
-            String relPath = toUnix(repoRoot.relativize(p).toString());
-            indexDeclarationsFromCU(cu, relPath, declIndex);
+            if (safeIsJavaFile(p)) {
+                CompilationUnit cu = parseQuietly(p);
+                if (cu != null) {
+                    String relPath = toUnix(repoRoot.relativize(p).toString());
+                    indexDeclarationsFromCU(cu, relPath, declIndex);
+                }
+            }
         }
         return declIndex;
     }
+
 
     private void indexDeclarationsFromCU(CompilationUnit cu, String relPath, Map<String, String> declIndex) {
         for (MethodDeclaration md : cu.findAll(MethodDeclaration.class)) {
@@ -290,16 +298,17 @@ public class MetricsCalculator {
         Map<String, Set<String>> incoming = new HashMap<>();
 
         for (Path p : filesToParse) {
-            if (!safeIsJavaFile(p)) continue;
-
-            CompilationUnit cu = parseQuietly(p);
-            if (cu == null) continue;
-
-            String relPath = toUnix(repoRoot.relativize(p).toString());
-            addIncomingEdgesFromCU(cu, relPath, keyToMethod, declIndex, incoming);
+            if (safeIsJavaFile(p)) {
+                CompilationUnit cu = parseQuietly(p);
+                if (cu != null) {
+                    String relPath = toUnix(repoRoot.relativize(p).toString());
+                    addIncomingEdgesFromCU(cu, relPath, keyToMethod, declIndex, incoming);
+                }
+            }
         }
         return incoming;
     }
+
 
     private void addIncomingEdgesFromCU(
             CompilationUnit cu,
@@ -347,7 +356,7 @@ public class MetricsCalculator {
             if (ownerFqn == null) return null;
 
             return declIndex.get(ownerFqn + "#" + name);
-        } catch (Throwable ignored) {
+        } catch (Exception _) {
             return null;
         }
     }
@@ -355,30 +364,40 @@ public class MetricsCalculator {
     private String safeDeclaringTypeFqn(ResolvedMethodDeclaration rd) {
         try {
             return rd.declaringType().getQualifiedName();
-        } catch (UnsupportedOperationException | IllegalStateException e) {
+        } catch (UnsupportedOperationException | IllegalStateException _) {
             return null;
         }
     }
 
     private String tryResolveFromScope(MethodCallExpr call, Map<String, String> declIndex) {
-        if (call.getScope().isEmpty()) return null;
+        Optional<Expression> scopeOpt = call.getScope();
+        if (scopeOpt.isEmpty()) {
+            return null;
+        }
 
+        Expression scopeExpr = scopeOpt.get();
         try {
-            var rt = call.getScope().get().calculateResolvedType();
+            var rt = scopeExpr.calculateResolvedType();
 
             String fqnScope = null;
             if (rt.isReferenceType()) {
                 fqnScope = rt.asReferenceType().getQualifiedName();
             } else if (rt.isArray() && rt.asArrayType().getComponentType().isReferenceType()) {
-                fqnScope = rt.asArrayType().getComponentType().asReferenceType().getQualifiedName();
+                fqnScope = rt.asArrayType()
+                        .getComponentType()
+                        .asReferenceType()
+                        .getQualifiedName();
             }
 
-            if (fqnScope == null) return null;
+            if (fqnScope == null) {
+                return null;
+            }
             return declIndex.get(fqnScope + "#" + call.getNameAsString());
-        } catch (Throwable ignored) {
+        } catch (Exception _) {
             return null;
         }
     }
+
 
     private String tryResolveSameFile(MethodCallExpr call, String relPath, Map<String, String> declIndex) {
         return declIndex.get(relPath + "::" + call.getNameAsString());
@@ -401,7 +420,7 @@ public class MetricsCalculator {
     private CompilationUnit parseQuietly(Path p) {
         try {
             return StaticJavaParser.parse(p);
-        } catch (Exception e) {
+        } catch (Exception _) {
             return null;
         }
     }
@@ -409,7 +428,7 @@ public class MetricsCalculator {
 
     private static boolean safeIsJavaFile(Path p) {
         try { return java.nio.file.Files.isRegularFile(p) && p.toString().endsWith(".java"); }
-        catch (Exception e) { return false; }
+        catch (Exception _) { return false; }
     }
 
     private static String makeKey(String classPath, String methodName) {
