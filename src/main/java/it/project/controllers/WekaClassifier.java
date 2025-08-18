@@ -255,6 +255,9 @@ public class WekaClassifier {
                 }
             }
 
+            double acc = testEval.pctCorrect() / 100.0; // percentuale → valore [0,1]
+            res.setAccuracy(acc);
+
             // Colleziona i risultati
             classifierResults.add(res);
 

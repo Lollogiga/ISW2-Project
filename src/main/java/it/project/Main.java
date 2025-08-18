@@ -44,5 +44,9 @@ public class Main {
             path += outputPath + "training/ARFF/OPENJPA_training_iter_4.arff";
         }
         WekaClassifier.runAndSaveFeatureCorrelationRanking(path, projectName, 0);
+
+        //AFeatures = Cyclomatic Complexity
+        //BClassifier = random Forest
     }
+
 }

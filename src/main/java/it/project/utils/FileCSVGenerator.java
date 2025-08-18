@@ -322,20 +322,18 @@ public class FileCSVGenerator {
 
         String dir = this.directoryPath + RESULT;
 
-        String fileName;
-        if (iteration != 0) {
-            fileName = String.format("%s_results_iter_%d.csv", projName, iteration);
-        } else {
-            fileName = String.format("%s_weka_metrics_aggregate.csv", projName);
-        }
+        final String fileName = (iteration != 0)
+                ? String.format("%s_results_iter_%d.csv", projName, iteration)
+                : String.format("%s_weka_metrics_aggregate.csv", projName);
+
         ensureDir(dir);
         File out = new File(dir, fileName);
 
         try (FileWriter fw = new FileWriter(out)) {
-            // Header con PofB20 / NPofB20
+            // Header con Accuracy + PofB20 / NPofB20
             fw.write(csvLine(new String[]{
                     "classifier","feature_selection","iterations",
-                    "avg_recall","avg_precision","avg_f1","avg_auc","avg_kappa",
+                    "avg_recall","avg_precision","avg_f1","avg_auc","avg_kappa","avg_accuracy",
                     "sum_tp","sum_fp","sum_tn","sum_fn",
                     "avg_pofb20","avg_npofb20"
             }));
@@ -343,7 +341,7 @@ public class FileCSVGenerator {
             for (Map.Entry<String, List<ClassifierResults>> e : groups.entrySet()) {
                 String[] parts = e.getKey().split("\\|", -1);
                 String clf = parts[0];
-                String featSel = parts.length > 1 ? parts[1] : "";
+                String featSel = (parts.length > 1) ? parts[1] : "";
 
                 List<ClassifierResults> list = e.getValue();
                 int n = list.size();
@@ -354,6 +352,7 @@ public class FileCSVGenerator {
                 double avgF1  = list.stream().mapToDouble(ClassifierResults::getFMeasure).average().orElse(Double.NaN);
                 double avgAuc = list.stream().mapToDouble(ClassifierResults::getAuc).average().orElse(Double.NaN);
                 double avgKap = list.stream().mapToDouble(ClassifierResults::getKappa).average().orElse(Double.NaN);
+                double avgAcc = list.stream().mapToDouble(ClassifierResults::getAccuracy).average().orElse(Double.NaN);
 
                 long sumTP = Math.round(list.stream().mapToDouble(ClassifierResults::getTruePositives).sum());
                 long sumFP = Math.round(list.stream().mapToDouble(ClassifierResults::getFalsePositives).sum());
@@ -361,13 +360,13 @@ public class FileCSVGenerator {
                 long sumFN = Math.round(list.stream().mapToDouble(ClassifierResults::getFalseNegatives).sum());
 
                 // Medie effort-aware (gestione null/NaN)
-                double avgPofB20 = averageNullable(list, ClassifierResults::getPofB20);
+                double avgPofB20  = averageNullable(list, ClassifierResults::getPofB20);
                 double avgNPofB20 = averageNullable(list, ClassifierResults::getNpofB20);
 
                 fw.write(csvLine(new String[]{
                         clf, featSel, String.valueOf(n),
                         formatOrNaN(avgRec), formatOrNaN(avgPre), formatOrNaN(avgF1),
-                        formatOrNaN(avgAuc), formatOrNaN(avgKap),
+                        formatOrNaN(avgAuc), formatOrNaN(avgKap), formatOrNaN(avgAcc),
                         String.valueOf(sumTP), String.valueOf(sumFP),
                         String.valueOf(sumTN), String.valueOf(sumFN),
                         formatOrNaN(avgPofB20), formatOrNaN(avgNPofB20)
@@ -379,6 +378,7 @@ public class FileCSVGenerator {
             Logger.getAnonymousLogger().log(Level.SEVERE, "Errore scrittura aggregato: " + ex.getMessage(), ex);
         }
     }
+
 
     private static String formatOrNaN(Double d) {
         if (d == null) return "NaN";

@@ -18,6 +18,7 @@ public class ClassifierResults {
 
     private Double pofB20;   // può essere null/NaN se non calcolabile
     private Double npofB20;  // idem
+    private Double accuracy;
 
     private final String selection;
 
@@ -128,6 +129,9 @@ public class ClassifierResults {
 
     public Double getNpofB20() { return npofB20; }
     public void setNpofB20(Double npofB20) { this.npofB20 = npofB20; }
+
+    public Double getAccuracy() { return accuracy; }
+    public void setAccuracy(Double accuracy) { this.accuracy = accuracy; }
 
     public double getPercTrainingInstances() {
         return percTrainingInstances;
