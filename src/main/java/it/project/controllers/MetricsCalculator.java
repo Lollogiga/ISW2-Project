@@ -188,150 +188,224 @@ public class MetricsCalculator {
         return new int[]{churn, locAdded};
     }
 
+
+    // ------------------------------------------------------------
+// PUBLIC/MAIN ORCHESTRATOR
+// ------------------------------------------------------------
     /**
      * Calcola il Fan-In per tutti i metodi della release: numero di metodi distinti che li invocano.
-     * Ritorna una mappa keyMetodo -> fanIn, dove la chiave è "pathRelativo::methodName"
-     * coerente con quella che usi nel dataset.
+     * Ritorna una mappa keyMetodo -> fanIn, dove la chiave è "pathRelativo::methodName".
      */
     private Map<String, Integer> computeFanInMapForRelease(Path repoRoot, List<JavaClass> classesInRelease) {
-        // 1) Indici utili
-        Map<String, JavaMethod> keyToMethod = new HashMap<>();
-        Map<String, String> declIndex = new HashMap<>(); // "FQN#name" o "path::name" -> canonicalKey (path::name)
-        Set<Path> filesToParse = new LinkedHashSet<>();
+        // 1) Indici di base e set file da analizzare
+        Map<String, JavaMethod> keyToMethod = buildKeyToMethod(classesInRelease);
+        Set<Path> filesToParse = collectFilesToParse(repoRoot, classesInRelease);
 
+        // 2) Configura Symbol Solver
+        configureSymbolSolver(repoRoot);
+
+        // 3) Prima passata: indicizza dichiarazioni (fallback)
+        Map<String, String> declIndex = buildDeclarationIndex(repoRoot, filesToParse);
+
+        // 4) Seconda passata: costruisci grafo incoming (callee -> callers)
+        Map<String, Set<String>> incoming = buildIncomingGraph(repoRoot, filesToParse, keyToMethod, declIndex);
+
+        // 5) Aggrega in <key, fanIn>
+        return toFanInMap(keyToMethod, incoming);
+    }
+
+    // ------------------------------------------------------------
+// STEP 1: raccolta indici/metadati
+// ------------------------------------------------------------
+    private Map<String, JavaMethod> buildKeyToMethod(List<JavaClass> classesInRelease) {
+        Map<String, JavaMethod> keyToMethod = new HashMap<>();
         for (JavaClass jc : classesInRelease) {
-            Path p = repoRoot.resolve(jc.getPath());
-            filesToParse.add(p);
+            String relPath = jc.getPath(); // già relativo
             for (JavaMethod jm : jc.getMethods()) {
-                keyToMethod.put(makeKey(jc.getPath(), jm.getName()), jm);
+                keyToMethod.put(makeKey(relPath, jm.getName()), jm);
             }
         }
+        return keyToMethod;
+    }
 
-        // 2) Configura il symbol solver (reflection + sorgenti del repo)
+    private Set<Path> collectFilesToParse(Path repoRoot, List<JavaClass> classesInRelease) {
+        Set<Path> filesToParse = new LinkedHashSet<>();
+        for (JavaClass jc : classesInRelease) {
+            filesToParse.add(repoRoot.resolve(jc.getPath()));
+        }
+        return filesToParse;
+    }
+
+    // ------------------------------------------------------------
+// STEP 2: configurazione SymbolSolver
+// ------------------------------------------------------------
+    private void configureSymbolSolver(Path repoRoot) {
         CombinedTypeSolver typeSolver = new CombinedTypeSolver(
                 new ReflectionTypeSolver(false),
                 new JavaParserTypeSolver(repoRoot.toFile())
         );
         StaticJavaParser.getConfiguration().setSymbolResolver(new JavaSymbolSolver(typeSolver));
+    }
 
-        // 3) Prima passata: indicizza tutte le dichiarazioni (per fallback risoluzione)
+    // ------------------------------------------------------------
+// STEP 3: prima passata - indice dichiarazioni
+// ------------------------------------------------------------
+    private Map<String, String> buildDeclarationIndex(Path repoRoot, Set<Path> filesToParse) {
+        Map<String, String> declIndex = new HashMap<>();
         for (Path p : filesToParse) {
             if (!safeIsJavaFile(p)) continue;
-            CompilationUnit cu;
-            try {
-                cu = StaticJavaParser.parse(p);
-            } catch (Exception parseEx) {
-                continue;
-            }
+
+            CompilationUnit cu = parseQuietly(p);
+            if (cu == null) continue;
+
             String relPath = toUnix(repoRoot.relativize(p).toString());
-            for (MethodDeclaration md : cu.findAll(MethodDeclaration.class)) {
-                String mName = md.getNameAsString();
-                String canonicalKey = makeKey(relPath, mName);
-
-                // owner FQN (se disponibile) -> canonical key
-                String ownerFqn = md.findAncestor(ClassOrInterfaceDeclaration.class)
-                        .flatMap(coid -> coid.getFullyQualifiedName()).orElse(null);
-                if (ownerFqn != null) {
-                    declIndex.put(ownerFqn + "#" + mName, canonicalKey);
-                }
-                // path::name come ulteriore chiave
-                declIndex.put(relPath + "::" + mName, canonicalKey);
-            }
+            indexDeclarationsFromCU(cu, relPath, declIndex);
         }
+        return declIndex;
+    }
 
-        // 4) Seconda passata: costruisci incoming callers (callee -> set di caller)
+    private void indexDeclarationsFromCU(CompilationUnit cu, String relPath, Map<String, String> declIndex) {
+        for (MethodDeclaration md : cu.findAll(MethodDeclaration.class)) {
+            String mName = md.getNameAsString();
+            String canonicalKey = makeKey(relPath, mName);
+
+            String ownerFqn = md.findAncestor(ClassOrInterfaceDeclaration.class)
+                    .flatMap(ClassOrInterfaceDeclaration::getFullyQualifiedName)
+                    .orElse(null);
+
+            if (ownerFqn != null) declIndex.put(ownerFqn + "#" + mName, canonicalKey);
+            declIndex.put(relPath + "::" + mName, canonicalKey); // path::name
+        }
+    }
+
+    // ------------------------------------------------------------
+// STEP 4: seconda passata - grafo incoming
+// ------------------------------------------------------------
+    private Map<String, Set<String>> buildIncomingGraph(
+            Path repoRoot,
+            Set<Path> filesToParse,
+            Map<String, JavaMethod> keyToMethod,
+            Map<String, String> declIndex
+    ) {
         Map<String, Set<String>> incoming = new HashMap<>();
 
         for (Path p : filesToParse) {
             if (!safeIsJavaFile(p)) continue;
-            CompilationUnit cu;
-            try {
-                cu = StaticJavaParser.parse(p);
-            } catch (Exception parseEx) {
-                continue;
-            }
+
+            CompilationUnit cu = parseQuietly(p);
+            if (cu == null) continue;
+
             String relPath = toUnix(repoRoot.relativize(p).toString());
-
-            cu.findAll(MethodCallExpr.class).forEach(call -> {
-                // Caller = metodo che contiene la call
-                String callerKey = call.findAncestor(MethodDeclaration.class)
-                        .map(md -> makeKey(relPath, md.getNameAsString()))
-                        .orElse(relPath + "::<init>");
-
-                String calleeKey = null;
-
-                // 4a) Prova risoluzione con SymbolSolver (versioni recenti: ResolvedMethodDeclaration)
-                try {
-                    ResolvedMethodDeclaration rd = call.resolve();
-                    String calleeName = rd.getName();
-
-                    String ownerFqn = null;
-                    try {
-                        ownerFqn = rd.declaringType().getQualifiedName(); // es: com.example.Foo
-                    } catch (UnsupportedOperationException | IllegalStateException ex) {
-                        // alcune volte declaringType() può fallire; come fallback puoi usare la firma qualificata
-                        // String qs = rd.getQualifiedSignature(); // es: com.example.Foo.bar(int)
-                        // Se vuoi, puoi parsare qs per ottenere ownerFqn e nome, ma qui continuiamo coi fallback sotto.
-                    }
-
-                    if (ownerFqn != null) {
-                        String mapped = declIndex.get(ownerFqn + "#" + calleeName);
-                        if (mapped != null) calleeKey = mapped;
-                    }
-                } catch (Throwable ignore) {
-                    // fallisce? useremo i fallback 4b/4c
-                }
-
-                // 4b) Fallback 1: se lo scope è risolvibile → usa il suo FQN (es. com.foo.Bar)
-                if (calleeKey == null) {
-                    try {
-                        if (call.getScope().isPresent()) {
-                            var scopeExpr = call.getScope().get();
-                            var rt = scopeExpr.calculateResolvedType();
-
-                            String fqnScope = null;
-                            if (rt.isReferenceType()) {
-
-                                com.github.javaparser.resolution.types.ResolvedReferenceType rrt = rt.asReferenceType();
-                                fqnScope = rrt.getQualifiedName();
-                            } else if (rt.isArray() && rt.asArrayType().getComponentType().isReferenceType()) {
-                                // caso raro: array di tipo riferimento
-                                fqnScope = rt.asArrayType()
-                                        .getComponentType()
-                                        .asReferenceType()
-                                        .getQualifiedName();
-                            }
-
-                            if (fqnScope != null) {
-                                String mapped = declIndex.get(fqnScope + "#" + call.getNameAsString());
-                                if (mapped != null) calleeKey = mapped;
-                            }
-                        }
-                    } catch (Throwable ignore) {
-                        // Ignora: non siamo riusciti a risolvere lo scope
-                    }
-                }
-
-
-                // 4c) Fallback 2: stesso file (path::name)
-                if (calleeKey == null) {
-                    String mapped = declIndex.get(relPath + "::" + call.getNameAsString());
-                    if (mapped != null) calleeKey = mapped;
-                }
-
-                if (calleeKey != null && keyToMethod.containsKey(calleeKey) && keyToMethod.containsKey(callerKey)) {
-                    incoming.computeIfAbsent(calleeKey, k -> new HashSet<>()).add(callerKey);
-                }
-            });
+            addIncomingEdgesFromCU(cu, relPath, keyToMethod, declIndex, incoming);
         }
+        return incoming;
+    }
 
-        // 5) Converte in mappa <key, fanIn>
+    private void addIncomingEdgesFromCU(
+            CompilationUnit cu,
+            String relPath,
+            Map<String, JavaMethod> keyToMethod,
+            Map<String, String> declIndex,
+            Map<String, Set<String>> incoming
+    ) {
+        cu.findAll(MethodCallExpr.class).forEach(call -> {
+            String callerKey = findCallerKey(call, relPath);
+            String calleeKey  = resolveCalleeKey(call, relPath, declIndex);
+
+            if (calleeKey == null) return;
+            if (!keyToMethod.containsKey(calleeKey)) return;
+            if (!keyToMethod.containsKey(callerKey)) return;
+
+            incoming.computeIfAbsent(calleeKey, k -> new HashSet<>()).add(callerKey);
+        });
+    }
+
+    private String findCallerKey(MethodCallExpr call, String relPath) {
+        return call.findAncestor(MethodDeclaration.class)
+                .map(md -> makeKey(relPath, md.getNameAsString()))
+                .orElse(relPath + "::<init>");
+    }
+
+    // ------------------------------------------------------------
+// Risoluzione callee: proverà (A) SymbolSolver, poi (B) scope, poi (C) path::name
+// ------------------------------------------------------------
+    private String resolveCalleeKey(MethodCallExpr call, String relPath, Map<String, String> declIndex) {
+        String key = tryResolveWithSymbolSolver(call, declIndex);
+        if (key != null) return key;
+
+        key = tryResolveFromScope(call, declIndex);
+        if (key != null) return key;
+
+        return tryResolveSameFile(call, relPath, declIndex);
+    }
+
+    private String tryResolveWithSymbolSolver(MethodCallExpr call, Map<String, String> declIndex) {
+        try {
+            ResolvedMethodDeclaration rd = call.resolve();
+            String name = rd.getName();
+            String ownerFqn = safeDeclaringTypeFqn(rd);
+            if (ownerFqn == null) return null;
+
+            return declIndex.get(ownerFqn + "#" + name);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private String safeDeclaringTypeFqn(ResolvedMethodDeclaration rd) {
+        try {
+            return rd.declaringType().getQualifiedName();
+        } catch (UnsupportedOperationException | IllegalStateException e) {
+            return null;
+        }
+    }
+
+    private String tryResolveFromScope(MethodCallExpr call, Map<String, String> declIndex) {
+        if (call.getScope().isEmpty()) return null;
+
+        try {
+            var rt = call.getScope().get().calculateResolvedType();
+
+            String fqnScope = null;
+            if (rt.isReferenceType()) {
+                fqnScope = rt.asReferenceType().getQualifiedName();
+            } else if (rt.isArray() && rt.asArrayType().getComponentType().isReferenceType()) {
+                fqnScope = rt.asArrayType().getComponentType().asReferenceType().getQualifiedName();
+            }
+
+            if (fqnScope == null) return null;
+            return declIndex.get(fqnScope + "#" + call.getNameAsString());
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private String tryResolveSameFile(MethodCallExpr call, String relPath, Map<String, String> declIndex) {
+        return declIndex.get(relPath + "::" + call.getNameAsString());
+    }
+
+    // ------------------------------------------------------------
+// STEP 5: riduzione a fan-in
+// ------------------------------------------------------------
+    private Map<String, Integer> toFanInMap(Map<String, JavaMethod> keyToMethod, Map<String, Set<String>> incoming) {
         Map<String, Integer> fanIn = new HashMap<>();
         for (String k : keyToMethod.keySet()) {
             fanIn.put(k, incoming.getOrDefault(k, Collections.emptySet()).size());
         }
         return fanIn;
     }
+
+    // ------------------------------------------------------------
+// Utility parsing silenziosa (riduce branching)
+// ------------------------------------------------------------
+    private CompilationUnit parseQuietly(Path p) {
+        try {
+            return StaticJavaParser.parse(p);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
 
     private static boolean safeIsJavaFile(Path p) {
         try { return java.nio.file.Files.isRegularFile(p) && p.toString().endsWith(".java"); }
