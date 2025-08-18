@@ -27,16 +27,15 @@ import java.util.regex.Pattern;
 public class SpearmanCorrelation {
     private static final Logger LOG = Logger.getLogger(SpearmanCorrelation.class.getName());
 
-    private final String baseDir;
     private final String projectName;
 
-    public SpearmanCorrelation(String baseDir, String projectName) {
-        this.baseDir = baseDir.endsWith(File.separator) ? baseDir : baseDir + File.separator;
+    public SpearmanCorrelation(String projectName) {
         this.projectName = projectName;
     }
 
     public void run() {
         try {
+            String baseDir = "src/main/resources/";
             Path trainDir = Paths.get(baseDir, projectName.toLowerCase(), "training", "ARFF");
             Path outDir   = Paths.get(baseDir, projectName.toLowerCase(), "otherFiles");
             Files.createDirectories(outDir);

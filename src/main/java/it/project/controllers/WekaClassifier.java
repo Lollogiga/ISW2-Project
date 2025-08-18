@@ -5,13 +5,7 @@ import it.project.entities.ClassifierSettings;
 import it.project.utils.DetectWalkPass;
 import it.project.utils.FileCSVGenerator;
 
-import weka.attributeSelection.ASEvaluation;
-import weka.attributeSelection.ASSearch;
-import weka.attributeSelection.AttributeSelection;
-import weka.attributeSelection.BestFirst;
-import weka.attributeSelection.CfsSubsetEval;
-import weka.attributeSelection.GreedyStepwise;
-import weka.attributeSelection.WrapperSubsetEval;
+import weka.attributeSelection.*;
 
 import weka.classifiers.Classifier;
 import weka.classifiers.Evaluation;
@@ -20,11 +14,20 @@ import weka.classifiers.lazy.IBk;
 import weka.classifiers.trees.RandomForest;
 
 import weka.core.Instances;
-import weka.core.SelectedTag;
+import weka.core.converters.ArffLoader;
 import weka.core.converters.ConverterUtils;
+import weka.filters.Filter;
+import weka.filters.unsupervised.attribute.NumericToNominal;
+import weka.filters.unsupervised.attribute.Remove;
+import weka.filters.unsupervised.attribute.RemoveUseless;
+import weka.filters.unsupervised.attribute.ReplaceMissingValues;
 
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -64,45 +67,9 @@ public class WekaClassifier {
         }
     }
 
-    /**
-     * Esegue la feature selection SOLO sul train, logga le feature scelte e
-     * applica lo stesso subset a train e test. Ritorna le due Instances ridotte.
-     */
-    private FSResult runFeatureSelection(
-            Instances trainDataset,
-            Instances testDataset,
-            String labelForLog,
-            ASEvaluation evaluator,
-            ASSearch search
-    ) throws Exception {
-
-        // Imposta/garantisce la classe come ultima colonna
-        trainDataset.setClassIndex(trainDataset.numAttributes() - 1);
-        testDataset.setClassIndex(testDataset.numAttributes() - 1);
-
-        AttributeSelection selector = new AttributeSelection();
-        selector.setEvaluator(evaluator);
-        selector.setSearch(search);
-
-        // Selezione SOLO sul train
-        selector.SelectAttributes(trainDataset);
-
-        // Log delle feature scelte
-        logSelectedFeatures(selector, trainDataset, labelForLog);
-
-        // Riduci entrambi usando LO STESSO subset
-        Instances newTrain = selector.reduceDimensionality(new Instances(trainDataset));
-        Instances newTest  = selector.reduceDimensionality(new Instances(testDataset));
-
-        // Reimposta class index dopo la riduzione
-        newTrain.setClassIndex(newTrain.numAttributes() - 1);
-        newTest.setClassIndex(newTest.numAttributes() - 1);
-
-        return new FSResult(newTrain, newTest, selector);
-    }
-
-    public List<ClassifierResults> fetchWekaAnalysis() throws Exception {
+    public void fetchWekaAnalysis() throws Exception {
         List<ClassifierResults> classifierResults = new ArrayList<>();
+        FileCSVGenerator csvGenerator = new FileCSVGenerator(RESOURCES, projName);
 
         /* Walk forward analysis */
         for (int i = 1; i <= walkPass; i++) {
@@ -122,7 +89,7 @@ public class WekaClassifier {
             Logger.getAnonymousLogger().log(Level.INFO, "Default Classifier");
             {
                 ClassifierSettings settings = new ClassifierSettings();
-                evaluateClassifier(classifierResults, i, trainDataset, testDataset, settings);
+                evaluateClassifier(classifierResults, i, trainDataset, testDataset, settings, csvGenerator);
             }
 
             // Preparazione evaluator comune (CFS)
@@ -135,13 +102,13 @@ public class WekaClassifier {
                 String label = "GreedyStepwise FORWARD + CFS at iteration " + i;
 
                 FSResult fs = runFeatureSelection(
-                        new Instances(trainDataset), new Instances(testDataset),
-                        label, cfs, gsForward
+                        new Instances(trainDataset), new Instances(testDataset), i,
+                        label, cfs, gsForward, csvGenerator
                 );
 
                 ClassifierSettings settings = new ClassifierSettings();
                 settings.setFeatureSelection("GreedyStepwise Forward + CFS");
-                evaluateClassifier(classifierResults, i, fs.train, fs.test, settings);
+                evaluateClassifier(classifierResults, i, fs.train, fs.test, settings, csvGenerator);
             }
 
             // ===== 2) GreedyStepwise BACKWARD + CFS =====
@@ -151,13 +118,13 @@ public class WekaClassifier {
                 String label = "GreedyStepwise BACKWARD + CFS at iteration " + i;
 
                 FSResult fs = runFeatureSelection(
-                        new Instances(trainDataset), new Instances(testDataset),
-                        label, cfs, gsBackward
+                        new Instances(trainDataset), new Instances(testDataset), i,
+                        label, cfs, gsBackward, csvGenerator
                 );
 
                 ClassifierSettings settings = new ClassifierSettings();
                 settings.setFeatureSelection("GreedyStepwise Backward + CFS");
-                evaluateClassifier(classifierResults, i, fs.train, fs.test, settings);
+                evaluateClassifier(classifierResults, i, fs.train, fs.test, settings, csvGenerator);
             }
 
             // ===== 2) GreedyStepwise BACKWARD + CFS =====
@@ -166,20 +133,18 @@ public class WekaClassifier {
                 String label = "BestFirst + CFS at iteration " + i;
 
                 FSResult fs = runFeatureSelection(
-                        new Instances(trainDataset), new Instances(testDataset),
-                        label, cfs, bestFirst
+                        new Instances(trainDataset), new Instances(testDataset), i,
+                        label, cfs, bestFirst,  csvGenerator
                 );
 
                 ClassifierSettings settings = new ClassifierSettings();
                 settings.setFeatureSelection("BestFirst + CFS");
-                evaluateClassifier(classifierResults, i, fs.train, fs.test, settings);
+                evaluateClassifier(classifierResults, i, fs.train, fs.test, settings, csvGenerator);
             }
 
         }
 
-        FileCSVGenerator csvGenerator = new FileCSVGenerator(RESOURCES, projName);
         csvGenerator.generateWekaResultFile(classifierResults, 0);
-        return classifierResults;
     }
 
     private void evaluateClassifier(
@@ -187,7 +152,8 @@ public class WekaClassifier {
             int iteration,
             Instances trainDataset,
             Instances testDataset,
-            ClassifierSettings settings
+            ClassifierSettings settings,
+            FileCSVGenerator csvGenerator
     ) throws Exception {
         int index = 0;
         String combinationClassifier = settings.getFeatureSelection();
@@ -246,7 +212,6 @@ public class WekaClassifier {
         }
 
         // CSV cumulativo per l'iterazione corrente
-        FileCSVGenerator csvGenerator = new FileCSVGenerator(RESOURCES, projName);
         csvGenerator.generateWekaResultFile(classifierResults, iteration);
     }
 
@@ -321,12 +286,67 @@ public class WekaClassifier {
         return "row_" + i;
     }
 
-    private boolean selectionHasPredictors(AttributeSelection sel, Instances ds) throws Exception {
-        int[] selIdx = sel.selectedAttributes(); // include la class
-        if (selIdx == null || selIdx.length == 0) return false;
-        int cls = ds.classIndex();
-        int predictors = 0;
-        for (int a : selIdx) if (a != cls) predictors++;
-        return predictors > 0;
+    /**
+     * Esegue la feature selection SOLO sul train, salva/logga le feature scelte e
+     * applica lo stesso subset a train e test. Ritorna le due Instances ridotte.
+     */
+    private FSResult runFeatureSelection(
+            Instances trainDataset,
+            Instances testDataset,
+            int iteration,
+            String fsLabel,                 // es. "GreedyStepwise Forward + CFS"
+            ASEvaluation evaluator,
+            ASSearch search,
+            FileCSVGenerator csvGenerator   // per salvare il CSV delle feature scelte
+    ) throws Exception {
+
+        // garantisci class index
+        trainDataset.setClassIndex(trainDataset.numAttributes() - 1);
+        testDataset.setClassIndex(testDataset.numAttributes() - 1);
+
+        AttributeSelection selector = new AttributeSelection();
+        selector.setEvaluator(evaluator);
+        selector.setSearch(search);
+
+        // Selezione SOLO sul train
+        selector.SelectAttributes(trainDataset);
+
+        // Indici selezionati
+        int[] indices = selector.selectedAttributes();
+
+        // Log & salvataggio
+        logSelectedFeatures(selector, trainDataset, fsLabel + " (iter " + iteration + ")");
+        csvGenerator.saveSelectedFeatures(iteration, fsLabel, trainDataset, indices);
+
+        // Riduci entrambi usando LO STESSO subset
+        Instances newTrain = selector.reduceDimensionality(new Instances(trainDataset));
+        Instances newTest  = selector.reduceDimensionality(new Instances(testDataset));
+
+        // Reimposta class index dopo la riduzione
+        newTrain.setClassIndex(newTrain.numAttributes() - 1);
+        newTest.setClassIndex(newTest.numAttributes() - 1);
+
+        return new FSResult(newTrain, newTest, selector);
     }
+
+
+    // Piccolo DTO per i punteggi
+    public static final class FeatureScore {
+        public final String name;
+        public final int index;
+        public final double score;
+
+        public FeatureScore(String name, int index, double score) {
+            this.name = name;
+            this.index = index;
+            this.score = score;
+        }
+
+        @Override
+        public String toString() {
+            return name + " (idx=" + index + ", score=" + score + ")";
+        }
+    }
+
+
 }

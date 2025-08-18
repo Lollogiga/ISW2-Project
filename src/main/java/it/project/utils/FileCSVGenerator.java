@@ -1,7 +1,9 @@
 package it.project.utils;
 
 
+import it.project.controllers.WekaClassifier;
 import it.project.entities.*;
+import weka.core.Instances;
 
 import java.io.File;
 import java.io.FileWriter;
@@ -31,6 +33,7 @@ public class FileCSVGenerator {
     private static final String TESTING_ARFF = TESTING + "ARFF" + File.separator;
     private static final String RESULT = "result" + File.separator;
     private static final String PREDICTION = "prediction" + File.separator;
+    private static final String FEATURES_SELECTION = "features_selection" + File.separator;
 
 
     public FileCSVGenerator(String directoryPath, String projName) throws IOException {
@@ -47,7 +50,8 @@ public class FileCSVGenerator {
                 TESTING_CSV,
                 TESTING_ARFF,
                 RESULT,
-                PREDICTION
+                PREDICTION,
+                FEATURES_SELECTION
         };
 
         createDirectories(subPaths);
@@ -294,7 +298,7 @@ public class FileCSVGenerator {
                                         String featureSelection,
                                         int iteration) {
         String safeFS = toSafeSlug(featureSelection);
-        String dir = this.directoryPath + projName.toLowerCase() + PREDICTION;
+        String dir = this.directoryPath + PREDICTION;
         String fileName = String.format("%s_predictions_iter_%d_%s_%s.csv",
                 projName, iteration, toSafeSlug(classifierName), safeFS);
 
@@ -315,7 +319,7 @@ public class FileCSVGenerator {
                         key(res.getClassifierName(), res.isSelection())
                 ));
 
-        String dir = this.directoryPath + projName.toLowerCase() + RESULT;
+        String dir = this.directoryPath + RESULT;
 
         String fileName;
         if(iteration != 0) {
@@ -370,6 +374,71 @@ public class FileCSVGenerator {
         return (classifierName == null ? "" : classifierName) + "|" + (featSel == null ? "" : featSel);
     }
 
+    public void saveSelectedFeatures(int iteration,
+                                     String featureSelection,
+                                     Instances dataset,
+                                     int[] selectedIndices) {
+        // cartelle/nomi file
+        String dirPerFS = this.directoryPath +  FEATURES_SELECTION + File.separator;
+        ensureDir(dirPerFS);
+
+        String safeFS = toSafeSlug(featureSelection);
+        File perFsFile = new File(dirPerFS,
+                String.format("%s_fs_iter_%d_%s.csv", projName, iteration, safeFS));
+
+        // file cumulativo
+        String cumulativePath = this.directoryPath + RESULT +
+                String.format("%s_features_selected_all.csv", projName);
+        File cumulativeFile = new File(cumulativePath);
+
+        try (FileWriter fwPer = new FileWriter(perFsFile);
+             FileWriter fwAll = new FileWriter(cumulativeFile, /*append*/ true)) {
+
+            // header per-file
+            fwPer.write(csvLine(new String[]{"rank","attribute_name","attribute_index"}));
+
+            // se il cumulativo non esiste (o è vuoto), scrivi header
+            if (!cumulativeFile.exists() || cumulativeFile.length() == 0) {
+                fwAll.write(csvLine(new String[]{
+                        "iteration","feature_selection","rank","attribute_name","attribute_index"
+                }));
+            }
+
+            int classIdx = dataset.classIndex();
+            int rank = 1;
+            for (int idx : selectedIndices) {
+                if (idx == classIdx) continue; // escludi la classe
+                String attrName = dataset.attribute(idx).name();
+
+                // riga per-file
+                fwPer.write(csvLine(new String[]{
+                        String.valueOf(rank),
+                        attrName,
+                        String.valueOf(idx)
+                }));
+
+                // riga cumulativa
+                fwAll.write(csvLine(new String[]{
+                        String.valueOf(iteration),
+                        featureSelection == null ? "base" : featureSelection,
+                        String.valueOf(rank),
+                        attrName,
+                        String.valueOf(idx)
+                }));
+
+                rank++;
+            }
+
+            Logger.getAnonymousLogger().log(Level.INFO,
+                    "Salvate feature selezionate: {0}",
+                    perFsFile.getAbsolutePath());
+
+        } catch (IOException e) {
+            Logger.getAnonymousLogger().log(Level.SEVERE,
+                    "Errore salvataggio feature selezionate: ", e.getMessage());
+        }
+    }
+
     private String csvLine(String[] cols) {
         return Arrays.stream(cols).map(this::csvEscape).collect(Collectors.joining(",")) + "\n";
     }
@@ -392,7 +461,6 @@ public class FileCSVGenerator {
         if (s == null || s.isBlank()) return "base";
         return s.toLowerCase().replaceAll("[^a-z0-9]+", "-");
     }
-
 
 
 }

@@ -5,6 +5,7 @@ import it.project.controllers.WekaClassifier;
 import it.project.utils.SpearmanCorrelation;
 
 import java.io.*;
+import java.util.Objects;
 import java.util.Properties;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -22,8 +23,8 @@ public class Main {
 
         String projectName = prop.getProperty("PROJECT_NAME");
         String skipExtractionProp = prop.getProperty("SKIP_EXTRACTION");
-        String outputDir = prop.getProperty("OUTPUT_DIR");
         String pmdPath = prop.getProperty("PMD_PATH");
+        String outputPath = prop.getProperty("OUTPUT_PATH");
 
         boolean skipExtraction = skipExtractionProp != null && skipExtractionProp.equalsIgnoreCase("true");
 
@@ -34,8 +35,18 @@ public class Main {
                 Logger.getAnonymousLogger().log(Level.INFO, String.format("Error during program execution flow %s", e));
             }
         }
-        //new SpearmanCorrelation(outputDir, projectName).run();
-        new WekaClassifier(projectName).fetchWekaAnalysis();
+        new SpearmanCorrelation(projectName).run();
+        WekaClassifier wekaClassifier = new WekaClassifier(projectName);
+        wekaClassifier.fetchWekaAnalysis();
+        String path = outputPath + projectName.toLowerCase() + "/";
+        if(Objects.equals(projectName, "BOOKKEEPER")) {
+            path += "training/ARFF/BOOKKEEPER_training_iter_4.arff";
+        }else{
+            path += outputPath + "training/ARFF/OPENJPA_training_iter_4.arff";
+        }
+
+
+
 
     }
 }
