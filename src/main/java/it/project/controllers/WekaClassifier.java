@@ -23,10 +23,10 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Random;
 import java.util.function.DoublePredicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -37,20 +37,20 @@ public class WekaClassifier {
 
     private final String projName;
     private final int walkPass;
-
+    private final FileCSVGenerator csvGenerator;
     /* Create List of classifiers to use */
     private final List<Classifier> classifiers = new ArrayList<>(List.of(new NaiveBayes(), new RandomForest(), new IBk()));
 
     private static final String RESOURCES = "src/main/resources/";
-
     private static final String NAIVE_BAYES = "naive bayes";
     private static final String RANDOM_FOREST = "random forest";
     private static final String IBK = "IBK";
 
     private static final String[] CLASSIFIER_NAME = {NAIVE_BAYES, RANDOM_FOREST, IBK};
 
-    public WekaClassifier(String projName) throws IOException {
+    public WekaClassifier(String projName, FileCSVGenerator csvGenerator) throws IOException {
         this.projName = projName;
+        this.csvGenerator = csvGenerator;
         this.walkPass = new DetectWalkPass(projName).detectWalkPass();
     }
 
@@ -68,84 +68,82 @@ public class WekaClassifier {
 
     public void fetchWekaAnalysis() throws Exception {
         List<ClassifierResults> classifierResults = new ArrayList<>();
-        FileCSVGenerator csvGenerator = new FileCSVGenerator(RESOURCES, projName);
 
-        /* Walk forward analysis */
         for (int i = 1; i <= walkPass; i++) {
-            String arffTrainingPath = RESOURCES + projName.toLowerCase() + "/training/ARFF/" + this.projName + "_training_iter_" + i + ".arff";
+            String arffTrainingPath = Paths.get(RESOURCES, projName.toLowerCase(),
+                    "training", "ARFF", this.projName + "_training_iter_" + i + ".arff").toString();
             ConverterUtils.DataSource trainingSource = new ConverterUtils.DataSource(arffTrainingPath);
             Instances trainDataset = trainingSource.getDataSet();
 
-            String arffTestingPath = RESOURCES + projName.toLowerCase() + "/testing/ARFF/" + this.projName + "_testing_iter_" + i + ".arff";
+            String arffTestingPath = Paths.get(RESOURCES, projName.toLowerCase(),
+                    "testing", "ARFF", this.projName + "_testing_iter_" + i + ".arff").toString();
             ConverterUtils.DataSource testingSource = new ConverterUtils.DataSource(arffTestingPath);
             Instances testDataset = testingSource.getDataSet();
 
-            /* Setting class to predict to last column (buggyness) */
             trainDataset.setClassIndex(trainDataset.numAttributes() - 1);
             testDataset.setClassIndex(testDataset.numAttributes() - 1);
 
             // ===== 0) Base: nessuna selezione =====
             Logger.getAnonymousLogger().log(Level.INFO, "Default Classifier");
-            {
-                ClassifierSettings settings = new ClassifierSettings();
-                evaluateClassifier(classifierResults, i, trainDataset, testDataset, settings, csvGenerator);
-            }
+            ClassifierSettings defaultSettings = new ClassifierSettings();
+            evaluateClassifier(classifierResults, i, trainDataset, testDataset, defaultSettings);
 
             // Preparazione evaluator comune (CFS)
             CfsSubsetEval cfs = new CfsSubsetEval();
 
-            // ===== 1) GreedyStepwise FORWARD + CFS =====
-            {
-                GreedyStepwise gsForward = new GreedyStepwise();
-                gsForward.setSearchBackwards(false);
-                String label = "GreedyStepwise FORWARD + CFS at iteration " + i;
+            // ===== 1) Forward =====
+            GreedyStepwise gsForward = new GreedyStepwise();
+            gsForward.setSearchBackwards(false);
+            runAndEvaluateFeatureSelection(
+                    classifierResults, i, trainDataset, testDataset,
+                    "GreedyStepwise Forward + CFS",
+                    cfs, gsForward
+            );
 
-                FSResult fs = runFeatureSelection(
-                        new Instances(trainDataset), new Instances(testDataset), i,
-                        label, cfs, gsForward, csvGenerator
-                );
+            // ===== 2) Backward =====
+            GreedyStepwise gsBackward = new GreedyStepwise();
+            gsBackward.setSearchBackwards(true);
+            runAndEvaluateFeatureSelection(
+                    classifierResults, i, trainDataset, testDataset,
+                    "GreedyStepwise Backward + CFS",
+                    cfs, gsBackward
+            );
 
-                ClassifierSettings settings = new ClassifierSettings();
-                settings.setFeatureSelection("GreedyStepwise Forward + CFS");
-                evaluateClassifier(classifierResults, i, fs.train, fs.test, settings, csvGenerator);
-            }
-
-            // ===== 2) GreedyStepwise BACKWARD + CFS =====
-            {
-                GreedyStepwise gsBackward = new GreedyStepwise();
-                gsBackward.setSearchBackwards(true);
-                String label = "GreedyStepwise BACKWARD + CFS at iteration " + i;
-
-                FSResult fs = runFeatureSelection(
-                        new Instances(trainDataset), new Instances(testDataset), i,
-                        label, cfs, gsBackward, csvGenerator
-                );
-
-                ClassifierSettings settings = new ClassifierSettings();
-                settings.setFeatureSelection("GreedyStepwise Backward + CFS");
-                evaluateClassifier(classifierResults, i, fs.train, fs.test, settings, csvGenerator);
-            }
-
-            // ===== 2) GreedyStepwise BACKWARD + CFS =====
-            {
-                BestFirst bestFirst = new BestFirst();
-                String label = "BestFirst + CFS at iteration " + i;
-
-                FSResult fs = runFeatureSelection(
-                        new Instances(trainDataset), new Instances(testDataset), i,
-                        label, cfs, bestFirst,  csvGenerator
-                );
-
-                ClassifierSettings settings = new ClassifierSettings();
-                settings.setFeatureSelection("BestFirst + CFS");
-                evaluateClassifier(classifierResults, i, fs.train, fs.test, settings, csvGenerator);
-            }
-
+            // ===== 3) BestFirst =====
+            BestFirst bestFirst = new BestFirst();
+            runAndEvaluateFeatureSelection(
+                    classifierResults, i, trainDataset, testDataset,
+                    "BestFirst + CFS",
+                    cfs, bestFirst
+            );
         }
 
         csvGenerator.generateWekaResultFile(classifierResults, 0);
     }
 
+    private void runAndEvaluateFeatureSelection(
+            List<ClassifierResults> classifierResults,
+            int iteration,
+            Instances trainDataset,
+            Instances testDataset,
+            String fsLabel,       // es. "GreedyStepwise Forward + CFS"
+            ASEvaluation evaluator,
+            ASSearch search
+    ) throws Exception {
+        String logLabel = fsLabel + " at iteration" + iteration;
+        FSResult fs = runFeatureSelection(
+                new Instances(trainDataset),
+                new Instances(testDataset),
+                iteration,
+                logLabel,
+                evaluator,
+                search
+        );
+
+        ClassifierSettings settings = new ClassifierSettings();
+        settings.setFeatureSelection(fsLabel);
+        evaluateClassifier(classifierResults, iteration, fs.train, fs.test, settings);
+    }
 
     // Piccolo holder per restituire sia il modello sia i risultati
     private static final class EvalOutcome {
@@ -162,12 +160,10 @@ public class WekaClassifier {
             int iteration,
             Instances trainDataset,
             Instances testDataset,
-            ClassifierSettings settings,
-            FileCSVGenerator csvGenerator
+            ClassifierSettings settings
     ) throws Exception {
 
         String combinationClassifier = settings.getFeatureSelection();
-        int pos = positiveClassIndex(testDataset, "yes");
 
         for (int index = 0; index < classifiers.size(); index++) {
             Classifier prototype = classifiers.get(index);
@@ -175,7 +171,7 @@ public class WekaClassifier {
             EvalOutcome outcome = evaluateSingleClassifier(
                     prototype, index, iteration,
                     trainDataset, testDataset,
-                    settings, combinationClassifier, pos
+                    settings, combinationClassifier
             );
 
             classifierResults.add(outcome.results);
@@ -189,9 +185,9 @@ public class WekaClassifier {
 
 // ========================= Helpers =========================
 
-    private int positiveClassIndex(Instances data, String positiveLabel) {
-        int idx = data.classAttribute().indexOfValue(positiveLabel);
-        return (idx >= 0) ? idx : 0;
+    private int positiveClassIndex(Instances data) {
+        int idx = data.classAttribute().indexOfValue("yes");
+        return Math.max(idx, 0);
     }
 
     private EvalOutcome evaluateSingleClassifier(
@@ -201,42 +197,30 @@ public class WekaClassifier {
             Instances trainDataset,
             Instances testDataset,
             ClassifierSettings settings,
-            String combinationClassifier,
-            int pos
+            String combinationClassifier
     ) throws Exception {
 
+        int pos = positiveClassIndex(testDataset); // <--- calcolato qui
+
         long seed = 12345L + iteration * 100L + index;
-        // A) 10-fold CV sul TRAIN (solo stima/tuning)
         Evaluation cvEval = crossValidate(prototype, trainDataset, seed);
         logCvMetrics(iteration, index, combinationClassifier, cvEval, pos);
 
-        // (eventuale) tuning basato su cvEval…
-
-        // B) Addestramento sul TRAIN completo
         Classifier model = AbstractClassifier.makeCopy(prototype);
         model.buildClassifier(trainDataset);
 
-        // C) Valutazione sul TEST
         Evaluation testEval = new Evaluation(trainDataset);
         testEval.evaluateModel(model, testDataset);
 
-        // Record risultati
         ClassifierResults res = baseResults(settings, trainDataset, testDataset, iteration, index);
-
-        // Metriche standard
         fillStandardMetrics(res, testEval, pos);
-
-        // Confusion matrix binaria
         fillConfusionMatrix(res, testEval.confusionMatrix(), testDataset, pos);
-
-        // D) Effort-aware (PofB20 / NPofB20)
         fillEffortAwareMetricsIfPossible(res, model, testDataset, pos);
-
-        // Accuracy
         res.setAccuracy(testEval.pctCorrect() / 100.0);
 
         return new EvalOutcome(model, res);
     }
+
 
     private Evaluation crossValidate(Classifier prototype, Instances trainDataset, long seed) throws Exception {
         Evaluation cvEval = new Evaluation(trainDataset);
@@ -273,7 +257,7 @@ public class WekaClassifier {
         );
     }
 
-    private void fillStandardMetrics(ClassifierResults res, Evaluation eval, int pos) throws Exception {
+    private void fillStandardMetrics(ClassifierResults res, Evaluation eval, int pos) {
         res.setRec(eval.recall(pos));
         res.setPreci(eval.precision(pos));
         res.setKappa(eval.kappa());
@@ -282,16 +266,26 @@ public class WekaClassifier {
     }
 
     private void fillConfusionMatrix(ClassifierResults res, double[][] cm, Instances testDataset, int pos) {
-        int noIndex = (testDataset.classAttribute().numValues() == 2) ? (1 - pos) : (pos == 0 ? 1 : 0);
-        long tp = Math.round(cm[pos][pos]);            // yes → yes
-        long fn = Math.round(cm[pos][noIndex]);        // yes → no
-        long tn = Math.round(cm[noIndex][noIndex]);    // no  → no
-        long fp = Math.round(cm[noIndex][pos]);        // no  → yes
+        int numValues = testDataset.classAttribute().numValues();
+
+        int noIndex;
+        if (numValues == 2) {
+            noIndex = 1 - pos;
+        } else {
+            noIndex = (pos == 0 ? 1 : 0);
+        }
+
+        long tp = Math.round(cm[pos][pos]);         // yes → yes
+        long fn = Math.round(cm[pos][noIndex]);     // yes → no
+        long tn = Math.round(cm[noIndex][noIndex]); // no  → no
+        long fp = Math.round(cm[noIndex][pos]);     // no  → yes
+
         res.setTruePositives(tp);
         res.setFalseNegatives(fn);
         res.setTrueNegatives(tn);
         res.setFalsePositives(fp);
     }
+
 
     private void fillEffortAwareMetricsIfPossible(ClassifierResults res, Classifier model, Instances testDataset, int pos) throws Exception {
         int locIdx = findLocIndex(testDataset);
@@ -333,6 +327,10 @@ public class WekaClassifier {
 
 
     public static void logSelectedFeatures(AttributeSelection selector, Instances dataset, String context) throws Exception {
+        if (!LOG.isLoggable(Level.INFO)) {
+            return; // evita costruzione stringa se non serve
+        }
+
         int[] indices = selector.selectedAttributes();
         StringBuilder sb = new StringBuilder();
         sb.append("=== Features selezionate [").append(context).append("] ===\n");
@@ -344,6 +342,7 @@ public class WekaClassifier {
 
         LOG.info(sb.toString());
     }
+
 
     private void makePrediction(Classifier classifier,
                                 Instances testDataset,
@@ -359,30 +358,42 @@ public class WekaClassifier {
 
         int pos = testDataset.classAttribute().indexOfValue("yes");
         if (pos < 0) pos = 0;
-        int neg = (testDataset.classAttribute().numValues() == 2) ? (1 - pos)
-                : (pos == 0 ? 1 : 0);
+
+        int neg;
+        if (testDataset.classAttribute().numValues() == 2) {
+            neg = 1 - pos;
+        } else if (pos == 0) {
+            neg = 1;
+        } else {
+            neg = 0;
+        }
 
         for (int i = 0; i < testDataset.numInstances(); i++) {
-            double[] dist = classifier.distributionForInstance(testDataset.instance(i));
-            int predicted = (int) classifier.classifyInstance(testDataset.instance(i));
-            int actual = (int) testDataset.instance(i).classValue();
+            var inst = testDataset.instance(i);
+            double[] dist = classifier.distributionForInstance(inst);
+            int predicted = (int) classifier.classifyInstance(inst);
+            int actual = (int) inst.classValue();
             String instanceId = extractInstanceId(testDataset, i);
+
+            String fsLabel = (combination == null || combination.isBlank()) ? "base" : combination;
+            String pYes = (pos < dist.length) ? String.valueOf(dist[pos]) : "NaN";
+            String pNo  = (neg < dist.length) ? String.valueOf(dist[neg]) : "NaN";
 
             rows.add(new String[] {
                     String.valueOf(iteration),
                     CLASSIFIER_NAME[indexClassifier],
-                    (combination == null || combination.isBlank()) ? "base" : combination,
+                    fsLabel,
                     instanceId,
                     String.valueOf(actual),
                     String.valueOf(predicted),
-                    (pos < dist.length) ? String.valueOf(dist[pos]) : "NaN",
-                    (neg < dist.length) ? String.valueOf(dist[neg]) : "NaN"
+                    pYes,
+                    pNo
             });
         }
 
-        FileCSVGenerator csv = new FileCSVGenerator(RESOURCES, projName);
-        csv.generatePredictionsFile(rows, CLASSIFIER_NAME[indexClassifier], combination, iteration);
+        csvGenerator.generatePredictionsFile(rows, CLASSIFIER_NAME[indexClassifier], combination, iteration);
     }
+
 
     private String extractInstanceId(Instances ds, int i) {
         String[] candidateNames = { "key", "id", "method", "method_id", "signature", "name", "file", "path" };
@@ -396,6 +407,7 @@ public class WekaClassifier {
                         return String.valueOf(ds.instance(i).value(idx));
                     }
                 } catch (Exception _) {
+                    // Ignorato: se l'attributo non è leggibile, si passa al prossimo candidato
                 }
             }
         }
@@ -412,8 +424,7 @@ public class WekaClassifier {
             int iteration,
             String fsLabel,                 // es. "GreedyStepwise Forward + CFS"
             ASEvaluation evaluator,
-            ASSearch search,
-            FileCSVGenerator csvGenerator   // per salvare il CSV delle feature scelte
+            ASSearch search
     ) throws Exception {
 
         // garantisci class index
@@ -464,7 +475,7 @@ public class WekaClassifier {
         }
     }
 
-    public static void runAndSaveFeatureCorrelationRanking(String arffPath, String projName, int topN) throws Exception {
+    public void runAndSaveFeatureCorrelationRanking(String arffPath, int topN) throws IOException {
         Instances data = loadArffOrThrow(arffPath);
 
         int clsIdx = pickClassIndexPreferIsBuggy(data);
@@ -477,13 +488,12 @@ public class WekaClassifier {
 
         scores = sortAndTruncateByAbs(scores, topN);
 
-        FileCSVGenerator csv = new FileCSVGenerator("src/main/resources/", projName);
-        csv.saveFeaturesCorrelationRanking(scores);
+        csvGenerator.saveFeaturesCorrelationRanking(scores);
     }
 
 // ====================== Helpers (piccoli e coesi) ======================
 
-    private static Instances loadArffOrThrow(String arffPath) throws Exception {
+    private static Instances loadArffOrThrow(String arffPath) throws IOException {
         if (arffPath == null || arffPath.isBlank())
             throw new IllegalArgumentException("ARFF path nullo o vuoto.");
 
@@ -572,7 +582,8 @@ public class WekaClassifier {
 
     /** Punti validi (senza missing): array primitivi per ridurre overhead. */
     private static final class ValidPairs {
-        final double[] xs, ys;
+        final double[] xs;
+        final double[] ys;
         final int n;
         ValidPairs(double[] xs, double[] ys, int n) { this.xs = xs; this.ys = ys; this.n = n; }
     }
@@ -584,12 +595,11 @@ public class WekaClassifier {
         int k = 0;
 
         for (int i = 0; i < n; i++) {
-            if (data.instance(i).isMissing(attrIdx)) continue;
-            double yi = y[i];
-            if (Double.isNaN(yi)) continue;
-            xsTmp[k] = data.instance(i).value(attrIdx);
-            ysTmp[k] = yi;
-            k++;
+            if (!data.instance(i).isMissing(attrIdx) && !Double.isNaN(y[i])) {
+                xsTmp[k] = data.instance(i).value(attrIdx);
+                ysTmp[k] = y[i];
+                k++;
+            }
         }
         return new ValidPairs(Arrays.copyOf(xsTmp, k), Arrays.copyOf(ysTmp, k), k);
     }
@@ -636,7 +646,7 @@ public class WekaClassifier {
         // fallback: prova a cercare "loc" nella stringa del nome
         for (int i = 0; i < ds.numAttributes(); i++) {
             String nm = ds.attribute(i).name();
-            if (nm != null && nm.toLowerCase().contains("LOC")) return i;
+            if (nm != null && nm.toLowerCase().contains("loc")) return i;
         }
         return -1;
     }

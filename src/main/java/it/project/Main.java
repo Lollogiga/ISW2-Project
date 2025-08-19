@@ -1,6 +1,7 @@
 package it.project;
 import it.project.controllers.DatasetCreation;
 import it.project.controllers.WekaClassifier;
+import it.project.utils.FileCSVGenerator;
 import it.project.utils.SpearmanCorrelation;
 
 import java.io.*;
@@ -36,7 +37,8 @@ public class Main {
             }
         }
         new SpearmanCorrelation(projectName).run();
-        WekaClassifier wekaClassifier = new WekaClassifier(projectName);
+        FileCSVGenerator csvGenerator = new FileCSVGenerator(outputPath, projectName);
+        WekaClassifier wekaClassifier = new WekaClassifier(projectName, csvGenerator);
         wekaClassifier.fetchWekaAnalysis();
         String path = Paths.get(outputPath)
                 .resolve(projectName.toLowerCase())
@@ -47,7 +49,7 @@ public class Main {
         }else{
             path += outputPath + "training/ARFF/OPENJPA_training_iter_4.arff";
         }
-        WekaClassifier.runAndSaveFeatureCorrelationRanking(path, projectName, 20);
+        wekaClassifier.runAndSaveFeatureCorrelationRanking(path, 20);
 
         //AFeatures = Cyclomatic Complexity
         //BClassifier = random Forest

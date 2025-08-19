@@ -85,13 +85,13 @@ public class FileARFFGenerator {
             String n = data.attribute(i).name();
             for (String target : lowerNames) {
                 if (n.toLowerCase(Locale.ROOT).equals(target)) {
-                    if (idxs.length() > 0) idxs.append(",");
+                    if (!idxs.isEmpty()) idxs.append(",");
                     idxs.append(i + 1); // 1-based
                     break;
                 }
             }
         }
-        if (idxs.length() == 0) return data;
+        if (idxs.isEmpty()) return data;
 
         Remove remove = new Remove();
         remove.setOptions(new String[]{"-R", idxs.toString()});
@@ -121,9 +121,17 @@ public class FileARFFGenerator {
         } else {
             String v0 = cls.value(0).toLowerCase(Locale.ROOT);
             String v1 = cls.value(1).toLowerCase(Locale.ROOT);
-            if (!((v0.equals("yes") && v1.equals("no")) || (v0.equals("no") && v1.equals("yes")))) {
-                LOG.warning("Attenzione: valori classe attesi {yes,no}; trovati {" + cls.value(0) + "," + cls.value(1) + "}.");
+            if (
+                    !((v0.equals("yes") && v1.equals("no")) || (v0.equals("no") && v1.equals("yes")))
+                            && LOG.isLoggable(Level.WARNING)
+            ) {
+                LOG.warning(String.format(
+                        "Attenzione: valori classe attesi {yes,no}; trovati {%s,%s}.",
+                        cls.value(0),
+                        cls.value(1)
+                ));
             }
+
         }
     }
 
