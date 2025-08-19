@@ -314,7 +314,7 @@ public class FileCSVGenerator {
             for (String[] r : rows) fw.write(csvLine(r));
             Logger.getAnonymousLogger().log(Level.INFO, "Scritto file di predizioni: {0}", out.getAbsolutePath());
         } catch (IOException e) {
-            Logger.getAnonymousLogger().log(Level.SEVERE, "Errore scrittura predizioni: " + e.getMessage(), e);
+            Logger.getAnonymousLogger().log(Level.SEVERE, "Errore scrittura predizioni: ", e);
         }
     }
 
