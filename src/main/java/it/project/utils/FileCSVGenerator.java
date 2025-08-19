@@ -128,54 +128,6 @@ public class FileCSVGenerator {
     }
 
 
-
-    public void generateDataset(List<Release> releases) {
-        String fileTitle = this.directoryPath + OTHERFILES + this.projName + "_dataset.csv";
-
-        try (FileWriter fw = new FileWriter(fileTitle)) {
-            fw.write(csvLine(new String[]{
-                    "Release_Index","MethodName",METHOD_SIGNATURE,
-                    "LOC","Parameters_Count","Fan_Out","Cyclomatic_Complexity","LCOM",
-                    "Churn","LOC_Added","Newcomer_Risk","n_Auth","Weekend_Commit",
-                    "numSmell","isBuggy"
-            }));
-
-            Logger.getAnonymousLogger().log(Level.INFO, "Generazione dataset in corso... {0}", fileTitle);
-
-            for (Release release : releases) {
-                for (JavaClass jc : release.getJavaClassList()) {
-                    for (JavaMethod jm : jc.getMethods()) {
-
-                        String methodName = jc.getPath() + "::" + jm.getName();
-                        String signature  = safeSignature(jm.getSignature());
-
-                        fw.write(csvLine(new String[]{
-                                String.valueOf(release.getIndex()),
-                                methodName,
-                                signature,
-                                n(jm.getLoc()),
-                                n(jm.getParametersCount()),
-                                n(jm.getFanOut()),
-                                n(jm.getCyclomaticComplexity()),
-                                n(jc.getLcom()),
-                                n(jm.getChurn()),
-                                n(jm.getLocAdded()),
-                                d(jm.getNewcomerRisk()),
-                                n(jm.getnAuth()),
-                                n(jm.getWeekendCommit()),
-                                n(jm.getnSmells()),
-                                (jm.isBuggy())
-                        }));
-                    }
-                }
-            }
-            Logger.getAnonymousLogger().log(Level.INFO, "Generazione dataset completata.");
-
-        } catch (IOException e) {
-            Logger.getAnonymousLogger().log(Level.SEVERE, "Errore durante la generazione del dataset CSV", e);
-        }
-    }
-
     public void generateTicketSummary(List<Ticket> ticketList) {
         String fileTitle = this.directoryPath + OTHERFILES + this.projName + "_ticket_summary.csv";
 
@@ -247,7 +199,10 @@ public class FileCSVGenerator {
         }
     }
 
-
+    public void generateFullDataset(List<Release> releases) {
+        String filePath = this.directoryPath + OTHERFILES + this.projName + "_fullDataset.csv";
+        generateDatasetFile(releases, filePath);
+    }
     public void generateTrainingSet(List<Release> releases, int iteration) {
         String filePath = this.directoryPath + TRAINING_CSV + this.projName + "_training_iter_" + iteration + ".csv";
         Logger.getAnonymousLogger().log(Level.INFO, "Generating Training Set: {0}", filePath);

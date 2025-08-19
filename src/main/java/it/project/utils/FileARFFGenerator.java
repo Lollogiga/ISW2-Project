@@ -160,4 +160,12 @@ public class FileARFFGenerator {
         ru.setInputFormat(data);
         return Filter.useFilter(data, ru);
     }
+
+    public void csvToARFFFull() throws Exception {
+        String base = PATH + projectName.toLowerCase() + "/otherFiles/";
+        String csvFile  = base + projectName + "_fullDataset.csv";           // dove già scrivi il full CSV
+        String arffFile = base + projectName + "_fullDataset.arff"; // destinazione ARFF
+        csvToARFF(csvFile, arffFile);
+    }
+
 }

@@ -2,10 +2,10 @@ package it.project.controllers;
 
 import it.project.entities.Release;
 import it.project.entities.Ticket;
-import it.project.utils.FileCSVGenerator;
-import it.project.utils.TicketUtils;
-import org.eclipse.jgit.api.Git;
+import it.project.utils.*;
 import org.eclipse.jgit.api.errors.GitAPIException;
+import org.eclipse.jgit.api.Git;
+
 import java.io.IOException;
 import java.util.Comparator;
 import java.util.List;
@@ -15,120 +15,166 @@ import java.util.stream.Collectors;
 
 public class DatasetCreation {
     private static final String DIRECTORY = "src/main/resources/";
+    private static final Logger LOG = Logger.getLogger(DatasetCreation.class.getName());
 
-    private DatasetCreation() {
-    }
+    private DatasetCreation() {}
 
     public static void dataExtraction(String projectName, String pmdPath) throws IOException {
         JiraExtraction jira = new JiraExtraction(projectName);
         FileCSVGenerator csv = new FileCSVGenerator(DIRECTORY, projectName);
 
+        // Releases + CSV
         List<Release> releaseList = jira.getReleaseInfo();
-        Logger.getAnonymousLogger().log(Level.INFO, "Data extraction: Releases List");
-
-        //Generiamo il file csv relativo alle release estratte da jira
+        LOG.info("Data extraction: Releases List");
         csv.generateReleaseInfo(releaseList);
 
-        List<Ticket> ticketList = jira.fetchTickets(releaseList);
-        Logger.getAnonymousLogger().log(Level.INFO, "Data extraction: Tickets List");
-        //Remove all ticket not reliable
-        TicketUtils.fixInconsistentTickets(ticketList, releaseList);
-        //Order data by resolution date:
-        ticketList.sort(Comparator.comparing(Ticket::getResolutionDate));
-
-        //Compute proportion for have IV:
-        Proportion.calculateProportion(ticketList, releaseList);
-        Logger.getAnonymousLogger().log(Level.INFO, "Data extraction: Proportion computed!");
-        TicketUtils.fixInconsistentTickets(ticketList, releaseList);
-
-        //Extraction from git:
+        // Tickets preparati (fix inconsistenze, ordine, proporzioni)
+        List<Ticket> ticketList = prepareTickets(jira, releaseList);
+        // Git: associa commit alle release
         GitExtraction gitExtraction = new GitExtraction(pmdPath);
-        try{
-            gitExtraction.associateCommitsToReleases(releaseList);
-        }catch (GitAPIException e){
-            Logger.getAnonymousLogger().log(Level.SEVERE, "GitExtraction Error", e);
-        }
+        associateCommitsSafe(gitExtraction, releaseList);
 
+        // Filtra release senza commit e riassegna indici
+        filterReleasesWithoutCommits(releaseList);
+        reassignSequentialIndices(releaseList);
 
-        // Remove releases without commit
-        long initialSize = releaseList.size();
-        releaseList.removeIf(release -> release.getCommitList().isEmpty());
-        long finalSize = releaseList.size();
-        Logger.getAnonymousLogger().log(Level.INFO, "Filtering release: removed {0} uncommitted release. Remaining: {1}", new Object[]{initialSize - finalSize, finalSize});
+        // Log debug FV=1
+        logTicketsFixedInFirstRelease(ticketList);
 
-        //Re-assigning index:
-        Logger.getAnonymousLogger().log(Level.INFO, "Re-assigning sequential indices to remaining releases...");
-        int index = 1;
-        for (Release release : releaseList) {
-            release.setIndex(index);
-            index++;
-        }
+        // Anti-snoring (40%)
+        List<Release> releaseToProcess = selectHeadReleases(releaseList, 0.40);
 
-        for (Ticket ticket : ticketList) {
-            if (ticket.getFixedVersion() != null && ticket.getFixedVersion().getIndex() == 1) {
-                String ivName = (ticket.getInjectedVersion() != null) ? ticket.getInjectedVersion().getName() : "null";
-                String avNames = ticket.getAffectedVersionsList().stream()
-                        .map(Release::getName)
-                        .collect(Collectors.joining(", "));
-                Logger.getAnonymousLogger().log(Level.INFO,
-                        "[DEBUG TICKET FV=1] Key: {0}, IV: {1}, AV: [{2}]",
-                        new Object[]{ticket.getTicketKey(), ivName, avNames});
-            }
-        }
-
-        //Avoid snoring: keep only first 40% of releases:
-        int totalReleases = releaseList.size();
-        int releasesToKeep = (int) Math.round(totalReleases * 0.40);
-        if(releasesToKeep == 0 && totalReleases > 0) releasesToKeep = 1;
-
-        Logger.getAnonymousLogger().log(Level.INFO, "Anti-snoring filter: Total releases are {0}. Keeping the first 40% ({1} releases).", new Object[]{totalReleases, releasesToKeep});
-        List<Release> releaseToProcess = releaseList.subList(0, releasesToKeep);
-
-        Logger.getAnonymousLogger().log(Level.INFO, "Anti-snoring filter applied. Final number of releases: {0}", releaseToProcess.size());
-
-        //Linkage tickets and commits:
-        Logger.getAnonymousLogger().log(Level.INFO, "Data extraction: Tickets Summary");
+        // Link ticket-commit + export riassunto
+        LOG.info("Data extraction: Tickets Summary");
         TicketUtils.linkTicketsToCommits(ticketList, releaseList);
         csv.generateTicketSummary(ticketList);
 
+        // Analisi codice per release selezionate
+        analyzeCode(gitExtraction, releaseToProcess);
 
-        //Extract class and method:
-        Logger.getAnonymousLogger().log((Level.INFO), "Data extraction: Extraction class and method");
-        for (Release release : releaseToProcess) {
-            gitExtraction.analyzeReleaseCode(release);
-            Logger.getAnonymousLogger().log(Level.INFO, "Release {0}: founded {1} class with method", new Object[]{release.getName(), release.getJavaClassList().size()});
-        }
-
-        //Export methodList in a csvFile:
+        // Elenco metodi
         csv.generateMethodList(releaseToProcess);
-        Logger.getAnonymousLogger().log(Level.INFO, "CSV creation: methods for each release saved in resources/otherFiles/{0}_MethodList", projectName);
+        LOG.log(Level.INFO, "CSV creation: methods for each release saved in resources/otherFiles/{0}_MethodList", projectName);
 
-        //Extract metrics:
-        Logger.getAnonymousLogger().log(Level.INFO, "Start metrics extraction");
-        try {
-            Git gitInstance = it.project.utils.RepoFactory.getGit();
-            MetricsCalculator metricsCalculator = new MetricsCalculator(gitInstance);
-            metricsCalculator.calculateHistoricalMetrics(releaseToProcess);
-            Logger.getAnonymousLogger().log(Level.INFO, "Metrics calculated.");
-        } catch (IOException e) {
-            Logger.getAnonymousLogger().log(Level.SEVERE, "Error during metrics calculation", e);
-        }
+        // Metriche storiche
+        extractMetricsSafe(releaseToProcess);
 
-        csv.generateDataset(releaseToProcess);
-        Logger.getAnonymousLogger().log(Level.INFO, "CSV creation: metrics for each method saved in resources/otherFiles/{0}_dateset: bugginess not yet computed", projectName);
+        // Walk-forward (training/testing)
+        runWalkForwardSafe(projectName, releaseList, ticketList, csv);
 
-        /*Walk forward*/
-        try {
-            Git gitInstance = it.project.utils.RepoFactory.getGit();
-            WalkForward walkForward = new WalkForward(projectName, releaseList, ticketList, csv, gitInstance);
-            walkForward.execute();
-        } catch (IOException e) {
-            Logger.getAnonymousLogger().log(Level.SEVERE, "An error occurred during the Walk-Forward process", e);
-        }
+        LOG.info("Training set and testing set files generated!");
 
-        Logger.getAnonymousLogger().log(Level.INFO, "Training set and testing set files generated!");
-
-
+        // Labelling full dataset + ARFF (post-Weka) con TUTTI i ticket
+        labelAndExportFullDatasetSafe(projectName, releaseList, ticketList, releaseToProcess, csv);
     }
 
+    /* ==================== Helpers ==================== */
+
+    private static List<Ticket> prepareTickets(JiraExtraction jira, List<Release> releaseList) throws IOException {
+        List<Ticket> ticketList = jira.fetchTickets(releaseList);
+        LOG.info("Data extraction: Tickets List");
+        TicketUtils.fixInconsistentTickets(ticketList, releaseList);
+        ticketList.sort(Comparator.comparing(Ticket::getResolutionDate));
+        Proportion.calculateProportion(ticketList, releaseList);
+        LOG.info("Data extraction: Proportion computed!");
+        TicketUtils.fixInconsistentTickets(ticketList, releaseList);
+        return ticketList;
+    }
+
+    private static void associateCommitsSafe(GitExtraction gitExtraction, List<Release> releaseList) {
+        try {
+            gitExtraction.associateCommitsToReleases(releaseList);
+        } catch (GitAPIException | IOException e) {
+            LOG.log(Level.SEVERE, "GitExtraction Error", e);
+        }
+    }
+
+    private static void filterReleasesWithoutCommits(List<Release> releaseList) {
+        long initialSize = releaseList.size();
+        releaseList.removeIf(r -> r.getCommitList().isEmpty());
+        long finalSize = releaseList.size();
+        LOG.log(Level.INFO, "Filtering release: removed {0} uncommitted release. Remaining: {1}",
+                new Object[]{initialSize - finalSize, finalSize});
+    }
+
+    private static void reassignSequentialIndices(List<Release> releaseList) {
+        LOG.info("Re-assigning sequential indices to remaining releases...");
+        int idx = 1;
+        for (Release r : releaseList) r.setIndex(idx++);
+    }
+
+    private static void logTicketsFixedInFirstRelease(List<Ticket> ticketList) {
+        ticketList.stream()
+                .filter(t -> t.getFixedVersion() != null && t.getFixedVersion().getIndex() == 1)
+                .forEach(t -> {
+                    String ivName = (t.getInjectedVersion() != null) ? t.getInjectedVersion().getName() : "null";
+                    String avNames = t.getAffectedVersionsList().stream()
+                            .map(Release::getName).collect(Collectors.joining(", "));
+                    LOG.log(Level.INFO, "[DEBUG TICKET FV=1] Key: {0}, IV: {1}, AV: [{2}]",
+                            new Object[]{t.getTicketKey(), ivName, avNames});
+                });
+    }
+
+    private static List<Release> selectHeadReleases(List<Release> releaseList, double fraction) {
+        int total = releaseList.size();
+        int keep = (int) Math.round(total * fraction);
+        if (keep == 0 && total > 0) keep = 1;
+        LOG.log(Level.INFO, "Anti-snoring filter: Total releases are {0}. Keeping the first {1}% ({2} releases).",
+                new Object[]{total, (int) (fraction * 100), keep});
+        List<Release> head = releaseList.subList(0, keep);
+        LOG.log(Level.INFO, "Anti-snoring filter applied. Final number of releases: {0}", head.size());
+        return head;
+    }
+
+    private static void analyzeCode(GitExtraction gitExtraction, List<Release> releaseToProcess) throws IOException {
+        LOG.info("Data extraction: Extraction class and method");
+        for (Release r : releaseToProcess) {
+            gitExtraction.analyzeReleaseCode(r);
+            LOG.log(Level.INFO, "Release {0}: founded {1} class with method",
+                    new Object[]{r.getName(), r.getJavaClassList().size()});
+        }
+    }
+
+    private static void extractMetricsSafe(List<Release> releaseToProcess) {
+        LOG.info("Start metrics extraction");
+        try {
+            Git git = RepoFactory.getGit();
+            new MetricsCalculator(git).calculateHistoricalMetrics(releaseToProcess);
+            LOG.info("Metrics calculated.");
+        } catch (IOException e) {
+            LOG.log(Level.SEVERE, "Error during metrics calculation", e);
+        }
+    }
+
+    private static void runWalkForwardSafe(String projectName, List<Release> releaseList,
+                                           List<Ticket> ticketList, FileCSVGenerator csv) {
+        try {
+            Git git = RepoFactory.getGit();
+            new WalkForward(projectName, releaseList, ticketList, csv, git).execute();
+        } catch (IOException e) {
+            LOG.log(Level.SEVERE, "An error occurred during the Walk-Forward process", e);
+        }
+    }
+
+    private static void labelAndExportFullDatasetSafe(String projectName, List<Release> releaseList,
+                                                      List<Ticket> ticketList, List<Release> releaseToProcess,
+                                                      FileCSVGenerator csv) {
+        try {
+            Git git = RepoFactory.getGit();
+            Buggyness b = new Buggyness(git);
+
+            // reset etichette
+            releaseList.forEach(r -> r.getJavaClassList()
+                    .forEach(jc -> jc.getMethods().forEach(m -> m.setBuggy(false))));
+
+            b.calculate(releaseList, ticketList);
+            csv.generateFullDataset(releaseToProcess);
+            new FileARFFGenerator(projectName, 0).csvToARFFFull();
+            LOG.info("Full dataset etichettato e rigenerato.");
+        } catch (IOException e) {
+            LOG.log(Level.SEVERE, "Errore durante il labelling post-Weka", e);
+        } catch (Exception e) {
+            LOG.log(Level.SEVERE, "Errore durante la creazione del file ARFF", e);
+        }
+    }
 }
