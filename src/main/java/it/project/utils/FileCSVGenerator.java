@@ -14,6 +14,7 @@ import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.function.ToDoubleFunction;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -22,6 +23,8 @@ import java.util.stream.Collectors;
 public class FileCSVGenerator {
     private final String directoryPath;
     private final String projName;
+    private static final String ATTRIBUTE_NAME = "attribute_name";
+    private static final String ATTRIBUTE_INDEX = "attribute_index";
 
 
     private static final String TESTING = "testing" + File.separator;
@@ -347,12 +350,12 @@ public class FileCSVGenerator {
                 int n = list.size();
 
                 // Medie classiche
-                double avgRec = list.stream().mapToDouble(ClassifierResults::getRec).average().orElse(Double.NaN);
-                double avgPre = list.stream().mapToDouble(ClassifierResults::getPreci).average().orElse(Double.NaN);
-                double avgF1  = list.stream().mapToDouble(ClassifierResults::getFMeasure).average().orElse(Double.NaN);
-                double avgAuc = list.stream().mapToDouble(ClassifierResults::getAuc).average().orElse(Double.NaN);
-                double avgKap = list.stream().mapToDouble(ClassifierResults::getKappa).average().orElse(Double.NaN);
-                double avgAcc = list.stream().mapToDouble(ClassifierResults::getAccuracy).average().orElse(Double.NaN);
+                double avgRec = averageOrNaN(list, ClassifierResults::getRec);
+                double avgPre = averageOrNaN(list, ClassifierResults::getPreci);
+                double avgF1  = averageOrNaN(list, ClassifierResults::getFMeasure);
+                double avgAuc = averageOrNaN(list, ClassifierResults::getAuc);
+                double avgKap = averageOrNaN(list, ClassifierResults::getKappa);
+                double avgAcc = averageOrNaN(list, ClassifierResults::getAccuracy);
 
                 long sumTP = Math.round(list.stream().mapToDouble(ClassifierResults::getTruePositives).sum());
                 long sumFP = Math.round(list.stream().mapToDouble(ClassifierResults::getFalsePositives).sum());
@@ -375,9 +378,19 @@ public class FileCSVGenerator {
 
             Logger.getAnonymousLogger().log(Level.INFO, "Scritto file aggregato: {0}", out.getAbsolutePath());
         } catch (IOException ex) {
-            Logger.getAnonymousLogger().log(Level.SEVERE, "Errore scrittura aggregato: " + ex.getMessage(), ex);
+            Logger logger = Logger.getAnonymousLogger();
+            if (logger.isLoggable(Level.SEVERE)) {
+                logger.log(Level.SEVERE, "Errore scrittura aggregato", ex);
+            }
         }
+
+
     }
+
+    private static double averageOrNaN(List<ClassifierResults> list, ToDoubleFunction<ClassifierResults> getter) {
+        return list.stream().mapToDouble(getter).average().orElse(Double.NaN);
+    }
+
 
 
     private static String formatOrNaN(Double d) {
@@ -408,6 +421,8 @@ public class FileCSVGenerator {
                                      Instances dataset,
                                      int[] selectedIndices) {
         // cartelle/nomi file
+        String attributeIndex = ATTRIBUTE_INDEX;
+
         String dirPerFS = this.directoryPath +  FEATURES_SELECTION + File.separator;
         ensureDir(dirPerFS);
 
@@ -424,12 +439,12 @@ public class FileCSVGenerator {
              FileWriter fwAll = new FileWriter(cumulativeFile, /*append*/ true)) {
 
             // header per-file
-            fwPer.write(csvLine(new String[]{"rank","attribute_name","attribute_index"}));
+            fwPer.write(csvLine(new String[]{"rank", ATTRIBUTE_NAME,attributeIndex}));
 
             // se il cumulativo non esiste (o è vuoto), scrivi header
             if (!cumulativeFile.exists() || cumulativeFile.length() == 0) {
                 fwAll.write(csvLine(new String[]{
-                        "iteration","feature_selection","rank","attribute_name","attribute_index"
+                        "iteration","feature_selection","rank", ATTRIBUTE_NAME,attributeIndex
                 }));
             }
 
@@ -464,7 +479,7 @@ public class FileCSVGenerator {
 
         } catch (IOException e) {
             Logger.getAnonymousLogger().log(Level.SEVERE,
-                    "Errore salvataggio feature selezionate: ", e.getMessage());
+                    "Errore salvataggio feature selezionate", e);
         }
     }
 
@@ -482,9 +497,13 @@ public class FileCSVGenerator {
         try {
             Files.createDirectories(new File(dirPath).toPath());
         } catch (IOException e) {
-            Logger.getAnonymousLogger().log(Level.SEVERE, "Impossibile creare directory " + dirPath + ": " + e.getMessage(), e);
+            Logger log = Logger.getAnonymousLogger();
+            if (log.isLoggable(Level.SEVERE)) {
+                log.log(Level.SEVERE, String.format("Impossibile creare directory %s: %s", dirPath, e.getMessage()), e);
+            }
         }
     }
+
 
     private String toSafeSlug(String s) {
         if (s == null || s.isBlank()) return "base";
@@ -497,7 +516,7 @@ public class FileCSVGenerator {
 
         try (FileWriter fw = new FileWriter(fileTitle)) {
             // Intestazione
-            fw.write(csvLine(new String[]{"rank","attribute_name","attribute_index","score"}));
+            fw.write(csvLine(new String[]{"rank", ATTRIBUTE_NAME,ATTRIBUTE_INDEX,"score"}));
 
             int rank = 1;
             for (WekaClassifier.FeatureScore fs : scores) {

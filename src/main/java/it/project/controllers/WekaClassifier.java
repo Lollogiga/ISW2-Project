@@ -224,9 +224,11 @@ public class WekaClassifier {
 
     private Evaluation crossValidate(Classifier prototype, Instances trainDataset, long seed) throws Exception {
         Evaluation cvEval = new Evaluation(trainDataset);
-        cvEval.crossValidateModel(prototype, trainDataset, 10, new java.util.Random(seed));
+        java.util.SplittableRandom rnd = new java.util.SplittableRandom(seed);
+        cvEval.crossValidateModel(prototype, trainDataset, 10, new java.util.Random(rnd.nextLong()));
         return cvEval;
     }
+
 
     private void logCvMetrics(int iteration, int index, String combinationClassifier, Evaluation cvEval, int pos) {
         if (!LOG.isLoggable(Level.INFO)) return;
