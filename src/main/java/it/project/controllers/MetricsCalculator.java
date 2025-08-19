@@ -5,7 +5,6 @@ import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
-import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.resolution.declarations.ResolvedMethodDeclaration;
 import com.github.javaparser.symbolsolver.JavaSymbolSolver;
@@ -68,7 +67,7 @@ public class MetricsCalculator {
                     int nSmells = countSmellsForMethod(smellsMap.getOrDefault(relativePath, Collections.emptyList()), javaMethod);
                     javaMethod.setnSmells(nSmells);
                     // Set Fan-In sul metodo (chiave: path::methodName)
-                    javaMethod.setFanIn(fanInMap.getOrDefault(makeKey(javaClass.getPath(), javaMethod.getName()), 0));
+                    javaMethod.setFanIn(fanInMap.getOrDefault(makeKey(javaClass.getPath(), javaMethod.getName(), javaMethod.getSignature()), 0));
 
                 }
             }
@@ -136,7 +135,7 @@ public class MetricsCalculator {
         method.setWeekendCommit(totalCommitsForMethod > 0 ? (double) weekendCommits / totalCommitsForMethod : 0.0);
 
         // Calcolo Newcomer Risk
-        String methodId = filePath + "::" + method.getName();
+        String methodId = it.project.utils.MethodSig.key(filePath, method.getName(), method.getSignature());
         Set<String> prevAuthorsSet = previousAuthors.getOrDefault(methodId, Collections.emptySet());
         long newAuthorsCount = authors.stream().filter(author -> !prevAuthorsSet.contains(author)).count();
         method.setNewcomerRisk(newAuthorsCount > 0 ? 1.0 : 0.0);
@@ -222,13 +221,14 @@ public class MetricsCalculator {
     private Map<String, JavaMethod> buildKeyToMethod(List<JavaClass> classesInRelease) {
         Map<String, JavaMethod> keyToMethod = new HashMap<>();
         for (JavaClass jc : classesInRelease) {
-            String relPath = jc.getPath(); // già relativo
+            String relPath = jc.getPath();
             for (JavaMethod jm : jc.getMethods()) {
-                keyToMethod.put(makeKey(relPath, jm.getName()), jm);
+                keyToMethod.put(makeKey(relPath, jm.getName(), jm.getSignature()), jm);
             }
         }
         return keyToMethod;
     }
+
 
     private Set<Path> collectFilesToParse(Path repoRoot, List<JavaClass> classesInRelease) {
         Set<Path> filesToParse = new LinkedHashSet<>();
@@ -275,16 +275,23 @@ public class MetricsCalculator {
     private void indexDeclarationsFromCU(CompilationUnit cu, String relPath, Map<String, String> declIndex) {
         for (MethodDeclaration md : cu.findAll(MethodDeclaration.class)) {
             String mName = md.getNameAsString();
-            String canonicalKey = makeKey(relPath, mName);
+            String sig   = it.project.utils.MethodSig.fromAst(md);
+            String canonicalKey = makeKey(relPath, mName, sig);
 
             String ownerFqn = md.findAncestor(ClassOrInterfaceDeclaration.class)
                     .flatMap(ClassOrInterfaceDeclaration::getFullyQualifiedName)
                     .orElse(null);
 
-            if (ownerFqn != null) declIndex.put(ownerFqn + "#" + mName, canonicalKey);
-            declIndex.put(relPath + "::" + mName, canonicalKey); // path::name
+            if (ownerFqn != null) {
+                // mappa FQN#name(signature) -> key canonica
+                declIndex.put(ownerFqn + "#" + mName + sig, canonicalKey);
+            }
+            // path::name(signature)
+            declIndex.put(relPath + "::" + mName + sig, canonicalKey);
         }
     }
+
+
 
     // ------------------------------------------------------------
 // STEP 4: seconda passata - grafo incoming
@@ -330,10 +337,27 @@ public class MetricsCalculator {
     }
 
     private String findCallerKey(MethodCallExpr call, String relPath) {
-        return call.findAncestor(MethodDeclaration.class)
-                .map(md -> makeKey(relPath, md.getNameAsString()))
-                .orElse(relPath + "::<init>");
+        // Caso 1: siamo dentro a un metodo normale
+        var mdOpt = call.findAncestor(MethodDeclaration.class);
+        if (mdOpt.isPresent()) {
+            MethodDeclaration md = mdOpt.get();
+            String sig = it.project.utils.MethodSig.fromAst(md);
+            return makeKey(relPath, md.getNameAsString(), sig);
+        }
+
+        // Caso 2: siamo dentro a un costruttore
+        var cdOpt = call.findAncestor(com.github.javaparser.ast.body.ConstructorDeclaration.class);
+        if (cdOpt.isPresent()) {
+            var cd = cdOpt.get();
+            String sig = it.project.utils.MethodSig.fromAst(cd);
+            // per i costruttori usa un nome sentinel, es. "<init>"
+            return it.project.utils.MethodSig.key(relPath, "<init>", sig);
+        }
+
+        // Fallback estremo: chiave anonima (evita collisioni senza firma)
+        return it.project.utils.MethodSig.key(relPath, "<unknown>", "()");
     }
+
 
     // ------------------------------------------------------------
 // Risoluzione callee: proverà (A) SymbolSolver, poi (B) scope, poi (C) path::name
@@ -351,15 +375,18 @@ public class MetricsCalculator {
     private String tryResolveWithSymbolSolver(MethodCallExpr call, Map<String, String> declIndex) {
         try {
             ResolvedMethodDeclaration rd = call.resolve();
-            String name = rd.getName();
             String ownerFqn = safeDeclaringTypeFqn(rd);
             if (ownerFqn == null) return null;
 
-            return declIndex.get(ownerFqn + "#" + name);
+            String sig = it.project.utils.MethodSig.fromResolved(rd); // "(...)" già risolta
+            String name = rd.getName();
+
+            return declIndex.get(ownerFqn + "#" + name + sig);
         } catch (Exception _) {
             return null;
         }
     }
+
 
     private String safeDeclaringTypeFqn(ResolvedMethodDeclaration rd) {
         try {
@@ -369,39 +396,58 @@ public class MetricsCalculator {
         }
     }
 
-    private String tryResolveFromScope(MethodCallExpr call, Map<String, String> declIndex) {
-        Optional<Expression> scopeOpt = call.getScope();
-        if (scopeOpt.isEmpty()) {
-            return null;
-        }
-
-        Expression scopeExpr = scopeOpt.get();
+    // Helper: prova a risolvere la chiamata con SymbolSolver e fare lookup nel declIndex
+    private String lookupByResolved(MethodCallExpr call, String fqnScope, Map<String, String> declIndex) {
         try {
-            var rt = scopeExpr.calculateResolvedType();
-
-            String fqnScope = null;
-            if (rt.isReferenceType()) {
-                fqnScope = rt.asReferenceType().getQualifiedName();
-            } else if (rt.isArray() && rt.asArrayType().getComponentType().isReferenceType()) {
-                fqnScope = rt.asArrayType()
-                        .getComponentType()
-                        .asReferenceType()
-                        .getQualifiedName();
-            }
-
-            if (fqnScope == null) {
-                return null;
-            }
-            return declIndex.get(fqnScope + "#" + call.getNameAsString());
+            var rd  = call.resolve();
+            String sig  = it.project.utils.MethodSig.fromResolved(rd);
+            String name = rd.getName();
+            return declIndex.get(fqnScope + "#" + name + sig);
         } catch (Exception _) {
             return null;
         }
     }
 
+    // Helper: estrae l'FQN del tipo dallo scope (obj.method() / arr[i].method())
+    private String resolveScopeFqn(com.github.javaparser.ast.expr.Expression scopeExpr) {
+        try {
+            var rt = scopeExpr.calculateResolvedType();
+
+            if (rt.isReferenceType()) {
+                return rt.asReferenceType().getQualifiedName();
+            }
+            if (rt.isArray() && rt.asArrayType().getComponentType().isReferenceType()) {
+                return rt.asArrayType().getComponentType().asReferenceType().getQualifiedName();
+            }
+            return null;
+        } catch (Exception _) {
+            return null;
+        }
+    }
+
+    private String tryResolveFromScope(MethodCallExpr call, Map<String, String> declIndex) {
+        var scopeOpt = call.getScope();
+        if (scopeOpt.isEmpty()) return null;
+
+        String fqnScope = resolveScopeFqn(scopeOpt.get());
+        if (fqnScope == null) return null;
+
+        // Unico punto "esterno" che fa la risoluzione dettagliata
+        return lookupByResolved(call, fqnScope, declIndex);
+    }
+
+
 
     private String tryResolveSameFile(MethodCallExpr call, String relPath, Map<String, String> declIndex) {
-        return declIndex.get(relPath + "::" + call.getNameAsString());
+        try {
+            var rd = call.resolve();
+            String sig = it.project.utils.MethodSig.fromResolved(rd);
+            return declIndex.get(relPath + "::" + call.getNameAsString() + sig);
+        } catch (Exception _) {
+            return null;
+        }
     }
+
 
     // ------------------------------------------------------------
 // STEP 5: riduzione a fan-in
@@ -413,6 +459,7 @@ public class MetricsCalculator {
         }
         return fanIn;
     }
+
 
     // ------------------------------------------------------------
 // Utility parsing silenziosa (riduce branching)
@@ -431,9 +478,10 @@ public class MetricsCalculator {
         catch (Exception _) { return false; }
     }
 
-    private static String makeKey(String classPath, String methodName) {
-        return toUnix(classPath) + "::" + methodName;
+    private static String makeKey(String classPath, String methodName, String signature) {
+        return it.project.utils.MethodSig.key(classPath, methodName, signature);
     }
+
 
     private static String toUnix(String rel) {
         return rel.replace(File.separatorChar, '/');

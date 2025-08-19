@@ -45,8 +45,9 @@ public class FileARFFGenerator {
     private void csvToARFF(String csvFile, String arffFile) throws Exception {
         Instances data = loadCsv(csvFile);
 
-        // 1) rimuovi sempre index e methodName (case-insensitive)
-        data = removeByNamesCaseInsensitive(data, "index", "methodname");
+        // 1) rimuovi sempre index, methodName e methodSignature (case-insensitive)
+        data = removeByNamesCaseInsensitive(data, "index", "methodname", "methodsignature");
+
 
         // 2) imposta classe isBuggy (case-insensitive); se non trovata -> ultima colonna
         setClassCaseInsensitive(data, "isbuggy");

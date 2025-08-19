@@ -297,12 +297,13 @@ public class GitExtraction {
                 {
 
                     String methodName = m.getNameAsString();
+                    String signature = it.project.utils.MethodSig.fromAst(m);
                     String methodContent = m.toString();
 
                     int startLine = m.getBegin().map(p -> p.line).orElse(-1);
                     int endLine = m.getEnd().map(p -> p.line).orElse(-1);
                     // Creiamo il JavaMethod passando la release corrente
-                    JavaMethod javaMethod = new JavaMethod(methodName, methodContent, release, startLine, endLine);
+                    JavaMethod javaMethod = new JavaMethod(methodName, methodContent, release, startLine, endLine, signature);
 
                     //LOC:
                     if(startLine != -1){

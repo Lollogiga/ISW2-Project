@@ -36,6 +36,7 @@ public class Main {
                 Logger.getAnonymousLogger().log(Level.INFO, String.format("Error during program execution flow %s", e));
             }
         }
+
         new SpearmanCorrelation(projectName).run();
         FileCSVGenerator csvGenerator = new FileCSVGenerator(outputPath, projectName);
         WekaClassifier wekaClassifier = new WekaClassifier(projectName, csvGenerator);
@@ -51,8 +52,13 @@ public class Main {
         }
         wekaClassifier.runAndSaveFeatureCorrelationRanking(path, 20);
 
-        //AFeatures = Cyclomatic Complexity
+        //AFeatures = LOC/Cyclomatic Complexity
         //BClassifier = random Forest
+        //AFMethod = bookkeeper-server/src/main/java/org/apache/bookkeeper/bookie/LedgerCacheImpl.java::flushLedger
+
+
+
     }
+
 
 }

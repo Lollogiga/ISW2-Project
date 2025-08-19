@@ -7,6 +7,7 @@ public class JavaMethod {
     private final Release release; // Link alla release di appartenenza
     private final int startLine;
     private final int endLine;
+    private final String signature;
 
     // Features
     private int loc;
@@ -24,12 +25,13 @@ public class JavaMethod {
 
     private boolean isBuggy;
 
-    public JavaMethod(String name, String content, Release release, int startLine, int endLine) {
+    public JavaMethod(String name, String content, Release release, int startLine, int endLine, String signature) {
         this.name = name;
         this.content = content;
         this.release = release;
         this.startLine = startLine;
         this.endLine = endLine;
+        this.signature = signature;
 
         // Inizializziamo i valori di default
         this.isBuggy = false; // Un metodo è "non buggy" finché non si prova il contrario
@@ -63,6 +65,10 @@ public class JavaMethod {
 
     public int getEndLine() {
         return endLine;
+    }
+
+    public String getSignature() {
+        return signature;
     }
 
     public int getLoc() {

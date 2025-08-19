@@ -25,7 +25,8 @@ public class FileCSVGenerator {
     private final String projName;
     private static final String ATTRIBUTE_NAME = "attribute_name";
     private static final String ATTRIBUTE_INDEX = "attribute_index";
-
+    private static final String METHOD_SIGNATURE = "MethodSignature";
+    private static final String CSV_SEP = ",";
 
     private static final String TESTING = "testing" + File.separator;
     private static final String TRAINING = "training" + File.separator;
@@ -69,74 +70,53 @@ public class FileCSVGenerator {
         }
     }
 
-    private void writeToFile(FileWriter fileWriter, String content) throws IOException {
-        fileWriter.append(content);
-        fileWriter.append("\n");
-    }
-
-    private void closeWriter(FileWriter fileWriter) {
-        if (fileWriter != null) {
-            try {
-                fileWriter.flush();
-                fileWriter.close();
-            } catch (IOException e) {
-                Logger.getAnonymousLogger().log(Level.INFO, e.getMessage());
-            }
-        }
-    }
-
-
     public void generateReleaseInfo(List<Release> releases) {
-        FileWriter fileWriter = null;
+        String fileTitle = this.directoryPath + OTHERFILES + this.projName + "_releaseList.csv";
 
-        try {
-            String fileTitle = this.directoryPath + OTHERFILES + this.projName + "_releaseList.csv";
-
-            fileWriter = new FileWriter(fileTitle);
-
-            writeToFile(fileWriter, "Index,Version ID,Version Name,Date");
+        try (FileWriter fw = new FileWriter(fileTitle)) {
+            fw.write(csvLine(new String[]{"Index","Version ID","Version Name","Date"}));
 
             for (int i = 0; i < releases.size(); i++) {
-                Release release = releases.get(i);
+                Release r = releases.get(i);
                 int index = i + 1;
 
-                writeToFile(fileWriter, index + "," + release.getVersionID() + "," +
-                        release.getName() + "," + release.getDate().toString());
+                fw.write(csvLine(new String[]{
+                        String.valueOf(index),
+                        String.valueOf(r.getVersionID()),
+                        r.getName(),
+                        String.valueOf(r.getDate())
+                }));
             }
-
         } catch (IOException e) {
             Logger.getAnonymousLogger().log(Level.SEVERE, "An error occurred while generating release info", e);
-        } finally {
-            closeWriter(fileWriter);
         }
     }
 
+
+    private String safeSignature(String sig) { return (sig == null || sig.isBlank()) ? "()" : sig; }
+    private String n(Integer x)  { return (x == null) ? "0" : String.valueOf(x); }
+    private String d(Double x)   { return (x == null) ? "0" : String.valueOf(x); }
+
     public void generateMethodList(List<Release> releases) {
-        FileWriter fileWriter = null;
         String fileTitle = this.directoryPath + OTHERFILES + this.projName + "_MethodList.csv";
 
-        try {
-            fileWriter = new FileWriter(fileTitle);
+        try (FileWriter fw = new FileWriter(fileTitle)) {
+            // Header: Release, path::name, MethodSignature
+            fw.write(csvLine(new String[]{"Release","MethodFullName",METHOD_SIGNATURE}));
 
-            // 1. Modifica l'intestazione per riflettere le due colonne
-            writeToFile(fileWriter, "Release,MethodFullName");
-
-            // Iteriamo su ogni release
             for (Release release : releases) {
-                String releaseName = release.getName(); // Otteniamo il nome della release
+                String releaseName = release.getName();
 
-                // Per ogni release, iteriamo su ogni classe Java
                 for (JavaClass javaClass : release.getJavaClassList()) {
-                    // Per ogni classe, iteriamo su ogni metodo
-                    for (JavaMethod javaMethod : javaClass.getMethods()) {
+                    for (JavaMethod jm : javaClass.getMethods()) {
+                        String methodIdentifier = javaClass.getPath() + "::" + jm.getName();
+                        String signature = safeSignature(jm.getSignature());
 
-                        String methodIdentifier = javaClass.getPath() + "::" + javaMethod.getName();
-
-                        // 2. Creiamo la riga del CSV con entrambi i valori, separati da una virgola
-                        String csvLine = releaseName + "," + methodIdentifier;
-
-                        // Scriviamo la riga completa nel file
-                        writeToFile(fileWriter, csvLine);
+                        fw.write(csvLine(new String[]{
+                                releaseName,
+                                methodIdentifier,
+                                signature
+                        }));
                     }
                 }
             }
@@ -144,50 +124,48 @@ public class FileCSVGenerator {
 
         } catch (IOException e) {
             Logger.getAnonymousLogger().log(Level.SEVERE, "Errore durante la generazione della lista dei metodi per release", e);
-        } finally {
-            closeWriter(fileWriter);
         }
     }
 
+
+
     public void generateDataset(List<Release> releases) {
-        FileWriter fileWriter = null;
         String fileTitle = this.directoryPath + OTHERFILES + this.projName + "_dataset.csv";
 
-        try {
-            fileWriter = new FileWriter(fileTitle);
-
-            // 1. Modifica l'intestazione per usare "Release_Index" e metterlo per primo.
-            String header = "Release_Index,MethodName,LOC,Parameters_Count,Fan_Out,Cyclomatic_Complexity,LCOM,Churn,LOC_Added,Newcomer_Risk,n_Auth,Weekend_Commit,numSmell,isBuggy";
-            writeToFile(fileWriter, header);
+        try (FileWriter fw = new FileWriter(fileTitle)) {
+            fw.write(csvLine(new String[]{
+                    "Release_Index","MethodName",METHOD_SIGNATURE,
+                    "LOC","Parameters_Count","Fan_Out","Cyclomatic_Complexity","LCOM",
+                    "Churn","LOC_Added","Newcomer_Risk","n_Auth","Weekend_Commit",
+                    "numSmell","isBuggy"
+            }));
 
             Logger.getAnonymousLogger().log(Level.INFO, "Generazione dataset in corso... {0}", fileTitle);
 
             for (Release release : releases) {
-                for (JavaClass javaClass : release.getJavaClassList()) {
-                    for (JavaMethod javaMethod : javaClass.getMethods()) {
-                        String methodName = javaClass.getPath() + "::" + javaMethod.getName();
+                for (JavaClass jc : release.getJavaClassList()) {
+                    for (JavaMethod jm : jc.getMethods()) {
 
-                        // 2. Modifica l'ordine dei valori e usa getIndex()
-                        String[] values = {
-                                String.valueOf(release.getIndex()), // Usa l'indice numerico
+                        String methodName = jc.getPath() + "::" + jm.getName();
+                        String signature  = safeSignature(jm.getSignature());
+
+                        fw.write(csvLine(new String[]{
+                                String.valueOf(release.getIndex()),
                                 methodName,
-                                String.valueOf(javaMethod.getLoc()),
-                                String.valueOf(javaMethod.getParametersCount()),
-                                String.valueOf(javaMethod.getFanOut()),
-                                String.valueOf(javaMethod.getCyclomaticComplexity()),
-                                String.valueOf(javaClass.getLcom()),
-                                String.valueOf(javaMethod.getChurn()),
-                                String.valueOf(javaMethod.getLocAdded()),
-                                String.valueOf(javaMethod.getNewcomerRisk()),
-                                String.valueOf(javaMethod.getnAuth()),
-                                String.valueOf(javaMethod.getWeekendCommit()),
-                                String.valueOf(javaMethod.getnSmells()),
-                                // 3. Correzione: Converti il booleano 'isBuggy' in una stringa "YES" o "NO"
-                                javaMethod.isBuggy()
-                        };
-
-                        String csvLine = String.join(",", values);
-                        writeToFile(fileWriter, csvLine);
+                                signature,
+                                n(jm.getLoc()),
+                                n(jm.getParametersCount()),
+                                n(jm.getFanOut()),
+                                n(jm.getCyclomaticComplexity()),
+                                n(jc.getLcom()),
+                                n(jm.getChurn()),
+                                n(jm.getLocAdded()),
+                                d(jm.getNewcomerRisk()),
+                                n(jm.getnAuth()),
+                                n(jm.getWeekendCommit()),
+                                n(jm.getnSmells()),
+                                (jm.isBuggy())
+                        }));
                     }
                 }
             }
@@ -195,96 +173,80 @@ public class FileCSVGenerator {
 
         } catch (IOException e) {
             Logger.getAnonymousLogger().log(Level.SEVERE, "Errore durante la generazione del dataset CSV", e);
-        } finally {
-            closeWriter(fileWriter);
         }
     }
 
     public void generateTicketSummary(List<Ticket> ticketList) {
-        FileWriter fileWriter = null;
         String fileTitle = this.directoryPath + OTHERFILES + this.projName + "_ticket_summary.csv";
 
-        try {
-            fileWriter = new FileWriter(fileTitle);
-
-            // 1. Scrivi l'intestazione del CSV
-            writeToFile(fileWriter, "Key,Injected Version,Opening Version,Fixed Version,\"Affected Version List\"");
+        try (FileWriter fw = new FileWriter(fileTitle)) {
+            fw.write(csvLine(new String[]{
+                    "Key","Injected Version","Opening Version","Fixed Version","Affected Version List"
+            }));
 
             Logger.getAnonymousLogger().log(Level.INFO, "Generating ticket summary file at: {0}", fileTitle);
 
             for (Ticket ticket : ticketList) {
-                // 2. Estrai i dati in modo sicuro, gestendo i valori null
                 String key = ticket.getTicketKey();
-
-                // Usiamo un operatore ternario per evitare NullPointerException
                 String iv = (ticket.getInjectedVersion() != null) ? ticket.getInjectedVersion().getName() : "N/A";
                 String ov = (ticket.getOpeningVersion() != null) ? ticket.getOpeningVersion().getName() : "N/A";
                 String fv = (ticket.getFixedVersion() != null) ? ticket.getFixedVersion().getName() : "N/A";
-
-                // 3. Formatta la lista delle Affected Versions come una singola stringa separata da spazi
-                String affectedVersions = ticket.getAffectedVersionsList().stream()
+                String affectedVersions = ticket.getAffectedVersionsList().isEmpty()
+                        ? "N/A"
+                        : ticket.getAffectedVersionsList().stream()
                         .map(Release::getName)
                         .collect(Collectors.joining(" "));
 
-                // Se la lista è vuota, usiamo "N/A" per coerenza
-                if (affectedVersions.isEmpty()) {
-                    affectedVersions = "N/A";
-                }
-
-                // 4. Assembla la riga CSV. Usiamo String.format per leggibilità e sicurezza.
-                //    Le virgolette intorno ad affectedVersions sono importanti per il formato CSV,
-                //    nel caso i nomi contengano caratteri speciali.
-                String csvLine = String.format("%s,%s,%s,%s,\"%s\"", key, iv, ov, fv, affectedVersions);
-
-                writeToFile(fileWriter, csvLine);
+                fw.write(csvLine(new String[]{ key, iv, ov, fv, affectedVersions }));
             }
 
             Logger.getAnonymousLogger().log(Level.INFO, "Ticket summary file generated successfully.");
 
         } catch (IOException e) {
             Logger.getAnonymousLogger().log(Level.SEVERE, "Error while generating ticket summary file", e);
-        } finally {
-            closeWriter(fileWriter);
         }
     }
 
     private void generateDatasetFile(List<Release> releases, String filePath) {
-        FileWriter fileWriter = null;
-        try {
-            fileWriter = new FileWriter(filePath);
-
-            // Intestazione del CSV
-            writeToFile(fileWriter, "Index,MethodName,LOC,CyclomaticComplexity,Churn,LocAdded,fan-in,fan-out, NewcomerRisk,Auth,WeekendCommit, nSmell, isBuggy");
+        try (FileWriter fw = new FileWriter(filePath)) {
+            fw.write(csvLine(new String[]{
+                    "Index","MethodName",METHOD_SIGNATURE,
+                    "LOC","CyclomaticComplexity","Churn","LocAdded",
+                    "fan-in","fan-out","NewcomerRisk","Auth","WeekendCommit",
+                    "nSmell","isBuggy"
+            }));
 
             for (Release release : releases) {
                 for (JavaClass jc : release.getJavaClassList()) {
                     for (JavaMethod jm : jc.getMethods()) {
-                        String line = String.join(",",
+
+                        String methodName = jc.getPath() + "::" + jm.getName();
+                        String signature  = safeSignature(jm.getSignature());
+
+                        fw.write(csvLine(new String[]{
                                 String.valueOf(release.getIndex()),
-                                "\"" + jc.getPath() + "::" + jm.getName() + "\"", // Metti tra virgolette per sicurezza
-                                String.valueOf(jm.getLoc()),
-                                String.valueOf(jm.getCyclomaticComplexity()),
-                                String.valueOf(jm.getChurn()),
-                                String.valueOf(jm.getLocAdded()),
-                                String.valueOf(jm.getFanIn()),
-                                String.valueOf(jm.getFanOut()),
-                                String.valueOf(jm.getNewcomerRisk()),
-                                String.valueOf(jm.getnAuth()),
-                                String.valueOf(jm.getWeekendCommit()),
-                                String.valueOf(jm.getnSmells()),
-                                jm.isBuggy()
-                        );
-                        writeToFile(fileWriter, line);
+                                methodName,
+                                signature,
+                                n(jm.getLoc()),
+                                n(jm.getCyclomaticComplexity()),
+                                n(jm.getChurn()),
+                                n(jm.getLocAdded()),
+                                n(jm.getFanIn()),
+                                n(jm.getFanOut()),
+                                d(jm.getNewcomerRisk()),
+                                n(jm.getnAuth()),
+                                n(jm.getWeekendCommit()),
+                                n(jm.getnSmells()),
+                                (jm.isBuggy())
+                        }));
                     }
                 }
             }
         } catch (IOException e) {
             Logger.getAnonymousLogger().log(Level.SEVERE, e, () -> "Error generating dataset file: " + filePath);
-
-        } finally {
-            closeWriter(fileWriter);
         }
     }
+
 
     public void generateTrainingSet(List<Release> releases, int iteration) {
         String filePath = this.directoryPath + TRAINING_CSV + this.projName + "_training_iter_" + iteration + ".csv";
@@ -297,6 +259,7 @@ public class FileCSVGenerator {
         Logger.getAnonymousLogger().log(Level.INFO, "Generating Testing Set: {0}", filePath);
         generateDatasetFile(releases, filePath);
     }
+
 
     public void generatePredictionsFile(List<String[]> rows,
                                         String classifierName,
@@ -484,14 +447,18 @@ public class FileCSVGenerator {
     }
 
     private String csvLine(String[] cols) {
-        return Arrays.stream(cols).map(this::csvEscape).collect(Collectors.joining(",")) + "\n";
+        String joined = Arrays.stream(cols)
+                .map(this::csvEscapeStrict)
+                .collect(Collectors.joining(CSV_SEP));
+        return joined + "\n";
     }
 
-    private String csvEscape(String s) {
-        if (s == null) return "";
-        String z = s.replace("\"", "\"\"");
-        return "\"" + z + "\"";
+    private String csvEscapeStrict(String s) {
+        String x = (s == null) ? "" : s;
+        x = x.replace("\"", "\"\""); // escape "
+        return "\"" + x + "\"";
     }
+
 
     private void ensureDir(String dirPath) {
         try {
