@@ -7,7 +7,6 @@ import weka.core.Instances;
 import weka.core.converters.ConverterUtils.DataSource;
 
 import java.io.BufferedWriter;
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.*;
 import java.util.*;
@@ -35,78 +34,114 @@ public class SpearmanCorrelation {
 
     public void run() {
         try {
-            String baseDir = "src/main/resources/";
-            Path trainDir = Paths.get(baseDir, projectName.toLowerCase(), "training", "ARFF");
-            Path outDir   = Paths.get(baseDir, projectName.toLowerCase(), "otherFiles");
+            Path baseDir  = Paths.get("src/main/resources/");
+            Path trainDir = baseDir.resolve(Paths.get(projectName.toLowerCase(), "training", "ARFF"));
+            Path outDir   = baseDir.resolve(Paths.get(projectName.toLowerCase(), "otherFiles"));
             Files.createDirectories(outDir);
 
             List<Integer> iters = detectIterations(trainDir);
             if (iters.isEmpty()) {
-                LOG.warning("Nessun ARFF di training trovato in " + trainDir);
+                if (LOG.isLoggable(Level.WARNING)) {
+                    LOG.warning("Nessun ARFF di training trovato in " + trainDir);
+                }
                 return;
             }
 
             // Aggregatori
-            Map<Pair, Stats> ffAgg = new HashMap<>();     // feature↔feature
-            Map<String, Stats> ftAgg = new HashMap<>();   // feature↔target
+            Map<Pair, Stats> ffAgg = new HashMap<>();   // feature↔feature
+            Map<String, Stats> ftAgg = new HashMap<>(); // feature↔target
 
             for (int iter : iters) {
                 Path trainArff = trainDir.resolve(projectName + "_training_iter_" + iter + ".arff");
-                Instances data = loadArff(trainArff.toString());
-                data.setClassIndex(data.numAttributes() - 1);
-
-                List<Integer> feats = numericFeatureIndices(data);
-
-                // --- feature-feature
-                for (int i = 0; i < feats.size(); i++) {
-                    for (int j = i + 1; j < feats.size(); j++) {
-                        int ai = feats.get(i), aj = feats.get(j);
-                        String fi = data.attribute(ai).name();
-                        String fj = data.attribute(aj).name();
-                        double rho = spearman(data, ai, aj);
-                        ffAgg.computeIfAbsent(Pair.of(fi, fj), k -> new Stats()).add(rho);
-                    }
-                }
-
-                // --- feature-target
-                int yes = data.classAttribute().indexOfValue("yes");
-                if (yes < 0) yes = 0;
-                double[] yFull = new double[data.numInstances()];
-                for (int r = 0; r < data.numInstances(); r++) {
-                    yFull[r] = ((int) data.instance(r).classValue() == yes) ? 1.0 : 0.0;
-                }
-                for (int a : feats) {
-                    String name = data.attribute(a).name();
-                    double[] x = columnIgnoringMissingPairwise(data, a, data.classIndex());
-                    double[] y = pairedOtherVector(data, a, data.classIndex(), yFull);
-                    double rho = (x.length < 2) ? 0.0 : pearson(ranks(x), ranks(y));
-                    ftAgg.computeIfAbsent(name, k -> new Stats()).add(rho);
-                }
+                processIteration(trainArff, ffAgg, ftAgg);
             }
 
-            // --- scrivi file finali ---
-            Path ffOut = outDir.resolve("feature_feature_spearman_summary.tsv");
-            Path ftOut = outDir.resolve("feature_target_spearman_summary.tsv");
-            writeFeatureFeatureSummary(ffOut, ffAgg);
-            writeFeatureTargetSummary(ftOut, ftAgg);
+            // Output finali
+            writeFeatureFeatureSummary(outDir.resolve("feature_feature_spearman_summary.tsv"), ffAgg);
+            writeFeatureTargetSummary(outDir.resolve("feature_target_spearman_summary.tsv"), ftAgg);
+            printTop10FeatureTarget(ftAgg);
 
-            // --- stampa top-10 per |rho| medio (feature-target) ---
-            System.out.println("=== Top-10 Feature–Target |rho| medio ===");
-            ftAgg.entrySet().stream()
-                    .sorted((a, b) -> Double.compare(Math.abs(b.getValue().mean()), Math.abs(a.getValue().mean())))
-                    .limit(10)
-                    .forEach(e -> System.out.printf(java.util.Locale.US,
-                            "%-30s  mean ρ = %+.3f  (std=%.3f, min=%.3f, max=%.3f, n=%d)%n",
-                            e.getKey(), e.getValue().mean(), e.getValue().std(), e.getValue().min, e.getValue().max, e.getValue().n)
-                    );
-            System.out.println();
-
-            LOG.info("Spearman aggregato scritto in: " + outDir);
-
+            if (LOG.isLoggable(Level.INFO)) {
+                LOG.info("Spearman aggregato scritto in: " + outDir);
+            }
         } catch (Exception e) {
             LOG.log(Level.SEVERE, "Errore in SpearmanCorrelationAggregator", e);
         }
     }
+
+// ===================== Helpers estratti =====================
+
+    private void processIteration(Path trainArff, Map<Pair, Stats> ffAgg, Map<String, Stats> ftAgg) throws Exception {
+        Instances data = loadArff(trainArff.toString());
+        data.setClassIndex(data.numAttributes() - 1);
+
+        List<Integer> feats = numericFeatureIndices(data);
+        accumulateFeatureFeature(data, feats, ffAgg);
+        accumulateFeatureTarget(data, feats, ftAgg);
+    }
+
+    private void accumulateFeatureFeature(Instances data, List<Integer> feats, Map<Pair, Stats> ffAgg) {
+        for (int i = 0; i < feats.size(); i++) {
+            for (int j = i + 1; j < feats.size(); j++) {
+                int ai = feats.get(i);
+                int aj = feats.get(j);
+                String fi = data.attribute(ai).name();
+                String fj = data.attribute(aj).name();
+                double rho = spearman(data, ai, aj);
+                ffAgg.computeIfAbsent(Pair.of(fi, fj), k -> new Stats()).add(rho);
+            }
+        }
+    }
+
+    private void accumulateFeatureTarget(Instances data, List<Integer> feats, Map<String, Stats> ftAgg) {
+        int yes = positiveClassIndex(data);
+        double[] yFull = buildBinaryTargetVector(data, yes);
+
+        for (int a : feats) {
+            String name = data.attribute(a).name();
+            double[] x = columnIgnoringMissingPairwise(data, a, data.classIndex());
+            double[] y = pairedOtherVector(data, a, data.classIndex(), yFull);
+            double rho = (x.length < 2) ? 0.0 : pearson(ranks(x), ranks(y));
+            ftAgg.computeIfAbsent(name, k -> new Stats()).add(rho);
+        }
+    }
+
+    private int positiveClassIndex(Instances data) {
+        int idx = data.classAttribute().indexOfValue("yes");
+        return Math.max(idx, 0);
+    }
+
+    private double[] buildBinaryTargetVector(Instances data, int yesIdx) {
+        int n = data.numInstances();
+        double[] y = new double[n];
+        for (int r = 0; r < n; r++) {
+            y[r] = ((int) data.instance(r).classValue() == yesIdx) ? 1.0 : 0.0;
+        }
+        return y;
+    }
+
+    private void printTop10FeatureTarget(Map<String, Stats> ftAgg) {
+        if (!LOG.isLoggable(Level.INFO)) return;
+
+        StringBuilder sb = new StringBuilder("=== Top-10 Feature–Target |rho| medio ===\n");
+        ftAgg.entrySet().stream()
+                .sorted((a, b) -> Double.compare(
+                        Math.abs(b.getValue().mean()),
+                        Math.abs(a.getValue().mean())))
+                .limit(10)
+                .forEach(e -> sb.append(String.format(java.util.Locale.US,
+                        "%-30s  mean ρ = %+.3f  (std=%.3f, min=%.3f, max=%.3f, n=%d)%n",
+                        e.getKey(),
+                        e.getValue().mean(),
+                        e.getValue().std(),
+                        e.getValue().min,
+                        e.getValue().max,
+                        e.getValue().n))
+                );
+
+        LOG.info(sb.toString());
+    }
+
 
     /* ================= helpers: IO & scansione ================= */
 
@@ -152,33 +187,35 @@ public class SpearmanCorrelation {
         return pearson(ranks(a), ranks(b));
     }
 
+    private static double[] collectValidValues(Instances d, int idxA, int idxB, DoubleSupplierForInstance supplier) {
+        double[] tmp = new double[d.numInstances()];
+        int k = 0;
+        for (int i = 0; i < d.numInstances(); i++) {
+            Instance inst = d.instance(i);
+            if (!inst.isMissing(idxA) && !inst.isMissing(idxB)) {
+                tmp[k++] = supplier.get(inst, i);
+            }
+        }
+        return Arrays.copyOf(tmp, k);
+    }
+
+    @FunctionalInterface
+    private interface DoubleSupplierForInstance {
+        double get(Instance inst, int rowIndex);
+    }
+
     private static double[] columnIgnoringMissingPairwise(Instances d, int idxA, int idxB) {
-        double[] tmp = new double[d.numInstances()];
-        int k = 0;
-        for (int i = 0; i < d.numInstances(); i++) {
-            Instance inst = d.instance(i);
-            if (!inst.isMissing(idxA) && !inst.isMissing(idxB)) tmp[k++] = inst.value(idxA);
-        }
-        return Arrays.copyOf(tmp, k);
+        return collectValidValues(d, idxA, idxB, (inst, i) -> inst.value(idxA));
     }
+
     private static double[] columnIgnoringMissingPairwiseOther(Instances d, int idxA, int idxB) {
-        double[] tmp = new double[d.numInstances()];
-        int k = 0;
-        for (int i = 0; i < d.numInstances(); i++) {
-            Instance inst = d.instance(i);
-            if (!inst.isMissing(idxA) && !inst.isMissing(idxB)) tmp[k++] = inst.value(idxB);
-        }
-        return Arrays.copyOf(tmp, k);
+        return collectValidValues(d, idxA, idxB, (inst, i) -> inst.value(idxB));
     }
+
     private static double[] pairedOtherVector(Instances d, int idxA, int idxClass, double[] yFull) {
-        double[] tmp = new double[d.numInstances()];
-        int k = 0;
-        for (int i = 0; i < d.numInstances(); i++) {
-            Instance inst = d.instance(i);
-            if (!inst.isMissing(idxA) && !inst.isMissing(idxClass)) tmp[k++] = yFull[i];
-        }
-        return Arrays.copyOf(tmp, k);
+        return collectValidValues(d, idxA, idxClass, (inst, i) -> yFull[i]);
     }
+
 
     /** ranks con gestione dei pari (average ranks). */
     private static double[] ranks(double[] x) {
@@ -201,12 +238,16 @@ public class SpearmanCorrelation {
     /** Pearson tra due vettori (stessa lunghezza). */
     private static double pearson(double[] a, double[] b) {
         int n = a.length;
-        double ma = 0, mb = 0;
+        double ma = 0;
+        double mb = 0;
         for (int i = 0; i < n; i++) { ma += a[i]; mb += b[i]; }
         ma /= n; mb /= n;
-        double num = 0, da = 0, db = 0;
+        double num = 0;
+        double da = 0;
+        double db = 0;
         for (int i = 0; i < n; i++) {
-            double xa = a[i] - ma, xb = b[i] - mb;
+            double xa = a[i] - ma;
+            double xb = b[i] - mb;
             num += xa * xb; da += xa * xa; db += xb * xb;
         }
         double den = Math.sqrt(da * db);
@@ -216,11 +257,31 @@ public class SpearmanCorrelation {
     /* ================= helpers: aggregazione & scrittura ================= */
 
     private static class Stats {
-        double sum=0, sumsq=0, min=Double.POSITIVE_INFINITY, max=Double.NEGATIVE_INFINITY; int n=0;
-        void add(double v){ sum+=v; sumsq+=v*v; min=Math.min(min,v); max=Math.max(max,v); n++; }
-        double mean(){ return n==0?0:sum/n; }
-        double std(){ if (n<=1) return 0; double m=mean(); return Math.sqrt(Math.max(0, sumsq/n - m*m)); }
+        double sum = 0;
+        double sumsq = 0;
+        double min = Double.POSITIVE_INFINITY;
+        double max = Double.NEGATIVE_INFINITY;
+        int n = 0;
+
+        void add(double v) {
+            sum += v;
+            sumsq += v * v;
+            min = Math.min(min, v);
+            max = Math.max(max, v);
+            n++;
+        }
+
+        double mean() {
+            return (n == 0) ? 0 : sum / n;
+        }
+
+        double std() {
+            if (n <= 1) return 0;
+            double m = mean();
+            return Math.sqrt(Math.max(0, sumsq / n - m * m));
+        }
     }
+
 
     private record Pair(String a, String b) {
         static Pair of(String x, String y) {
