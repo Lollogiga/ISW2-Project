@@ -38,7 +38,9 @@ public class Main {
         new SpearmanCorrelation(projectName).run();
         WekaClassifier wekaClassifier = new WekaClassifier(projectName);
         wekaClassifier.fetchWekaAnalysis();
-        String path = Paths.get(outputPath, projectName.toLowerCase()).toString();
+        String path = Paths.get(outputPath)
+                .resolve(projectName.toLowerCase())
+                + File.separator;
 
         if(Objects.equals(projectName, "BOOKKEEPER")) {
             path += "training/ARFF/BOOKKEEPER_training_iter_4.arff";
