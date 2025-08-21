@@ -55,9 +55,11 @@ public class Main {
             }
             wekaClassifier.runAndSaveFeatureCorrelationRanking(path, 20);
         }
+
         //AFeatures = LOC/Cyclomatic Complexity
         //BClassifier = random Forest
         //AFMethod = bookkeeper-server/src/main/java/org/apache/bookkeeper/bookie/LedgerCacheImpl.java::flushLedger
+
         SmellImpactAnalyzer analyzer = new SmellImpactAnalyzer();
         if(projectName.equals("BOOKKEEPER")) {
             String arffPath = "src/main/resources/bookkeeper/otherFiles/BOOKKEEPER_fullDataset.arff";

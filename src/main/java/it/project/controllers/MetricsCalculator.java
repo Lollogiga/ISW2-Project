@@ -53,28 +53,38 @@ public class MetricsCalculator {
 
             File reportFile = new File(git.getRepository().getWorkTree(), "pmd-reports/pmd-" + release.getName() + ".xml");
             Path repoRoot = git.getRepository().getWorkTree().toPath().toAbsolutePath();
+
+            // 0) PRECOMPUTE una volta
+            Map<String, List<Smell>> smellsMap = new PmdParser().parseReport(reportFile, repoRoot.toFile());
+            List<CommitData> commitDataList = precomputeCommitData(release.getCommitList());
+
             Map<String, Set<String>> currentAuthors = new HashMap<>();
             Map<String, Integer> fanInMap = computeFanInMapForRelease(repoRoot, release.getJavaClassList());
 
             for (JavaClass javaClass : release.getJavaClassList()) {
                 String relativePath = javaClass.getPath();
+                List<Smell> smellsForFile = smellsMap.getOrDefault(relativePath, Collections.emptyList());
 
                 for (JavaMethod javaMethod : javaClass.getMethods()) {
-                    calculateMetricsForMethod(javaMethod, release.getCommitList(), previousAuthors, currentAuthors);
+                    // 1) metriche storico-lineari con commit precomputati (usa relativePath)
+                    calculateMetricsForMethod(javaMethod, relativePath, commitDataList, previousAuthors, currentAuthors);
 
-                    // parseReport viene richiamato come nel codice originale
-                    Map<String, List<Smell>> smellsMap = new PmdParser().parseReport(reportFile, repoRoot.toFile());
-                    int nSmells = countSmellsForMethod(smellsMap.getOrDefault(relativePath, Collections.emptyList()), javaMethod);
+                    // 2) smells (lookup in mappa già pronta)
+                    int nSmells = countSmellsForMethod(smellsForFile, javaMethod);
                     javaMethod.setnSmells(nSmells);
-                    // Set Fan-In sul metodo (chiave: path::methodName)
-                    javaMethod.setFanIn(fanInMap.getOrDefault(makeKey(javaClass.getPath(), javaMethod.getName(), javaMethod.getSignature()), 0));
 
+                    // 3) fan-in (lookup)
+                    javaMethod.setFanIn(fanInMap.getOrDefault(
+                            makeKey(javaClass.getPath(), javaMethod.getName(), javaMethod.getSignature()),
+                            0
+                    ));
                 }
             }
 
             previousAuthors = currentAuthors;
         }
     }
+
 
     private int countSmellsForMethod(List<Smell> smells, JavaMethod method) {
         int count = 0;
@@ -92,101 +102,82 @@ public class MetricsCalculator {
 
 
 
-    private void calculateMetricsForMethod(JavaMethod method, List<RevCommit> commits,
-                                           Map<String, Set<String>> previousAuthors,
-                                           Map<String, Set<String>> currentAuthors) throws IOException {
-
+    private void calculateMetricsForMethod(
+            JavaMethod method,
+            String filePath,
+            List<CommitData> commitDataList,
+            Map<String, Set<String>> previousAuthors,
+            Map<String, Set<String>> currentAuthors
+    ) {
         int totalChurn = 0;
         int locAdded = 0;
         Set<String> authors = new HashSet<>();
         int weekendCommits = 0;
         int totalCommitsForMethod = 0;
 
-        String filePath = method.getRelease().getJavaClassList().stream()
-                .filter(c -> c.getMethods().contains(method))
-                .findFirst().get().getPath();
+        int startLine = method.getStartLine();
+        int endLine   = method.getEndLine();
 
-        for (RevCommit commit : commits) {
-            if (commit.getParentCount() == 0) continue; // Salta il primo commit del repo
+        for (CommitData cd : commitDataList) {
+            List<Edit> edits = cd.editsByPath.get(filePath);
+            if (edits == null || edits.isEmpty()) continue;
 
-            RevCommit parent = commit.getParent(0);
-            boolean methodTouched = wasMethodTouched(commit, parent, filePath, method.getStartLine(), method.getEndLine());
-
-            if (methodTouched) {
+            CommitImpact impact = calculateImpactForCommit(edits, startLine, endLine);
+            if (impact.touched) {
                 totalCommitsForMethod++;
-                authors.add(commit.getAuthorIdent().getEmailAddress());
-
-                // Calcolo Churn e LOC Added
-                int[] churnAndAdded = calculateChurnAndLocAdded(commit, parent, filePath, method.getStartLine(), method.getEndLine());
-                totalChurn += churnAndAdded[0];
-                locAdded += churnAndAdded[1];
-
-                // Calcolo Weekend Commit Ratio
-                LocalDateTime commitDate = LocalDateTime.ofInstant(Instant.ofEpochSecond(commit.getCommitTime()), ZoneId.systemDefault());
-                if (commitDate.getDayOfWeek() == DayOfWeek.SATURDAY || commitDate.getDayOfWeek() == DayOfWeek.SUNDAY) {
-                    weekendCommits++;
-                }
+                authors.add(cd.authorEmail);
+                totalChurn += impact.churn;
+                locAdded   += impact.added;
+                if (cd.weekend) weekendCommits++;
             }
         }
 
         method.setChurn(totalChurn);
         method.setLocAdded(locAdded);
         method.setnAuth(authors.size());
-        method.setWeekendCommit(totalCommitsForMethod > 0 ? (double) weekendCommits / totalCommitsForMethod : 0.0);
+        method.setWeekendCommit(totalCommitsForMethod > 0 ?
+                (double) weekendCommits / totalCommitsForMethod : 0.0);
 
-        // Calcolo Newcomer Risk
+        // Newcomer risk
         String methodId = it.project.utils.MethodSig.key(filePath, method.getName(), method.getSignature());
         Set<String> prevAuthorsSet = previousAuthors.getOrDefault(methodId, Collections.emptySet());
-        long newAuthorsCount = authors.stream().filter(author -> !prevAuthorsSet.contains(author)).count();
+        long newAuthorsCount = authors.stream().filter(a -> !prevAuthorsSet.contains(a)).count();
         method.setNewcomerRisk(newAuthorsCount > 0 ? 1.0 : 0.0);
 
-        // Memorizza gli autori di questo metodo per la prossima release
         currentAuthors.put(methodId, authors);
     }
 
-    // Metodo helper per controllare se un metodo è stato toccato in un commit
-    private boolean wasMethodTouched(RevCommit commit, RevCommit parent, String filePath, int startLine, int endLine) throws IOException {
-        try (DiffFormatter diffFormatter = new DiffFormatter(DisabledOutputStream.INSTANCE)) {
-            diffFormatter.setRepository(git.getRepository());
-            List<DiffEntry> diffs = diffFormatter.scan(parent.getTree(), commit.getTree());
-
-            for (DiffEntry diff : diffs) {
-                if (diff.getNewPath().equals(filePath)) {
-                    for (Edit edit : diffFormatter.toFileHeader(diff).toEditList()) {
-                        int changeStart = edit.getBeginB();
-                        int changeEnd = edit.getEndB();
-                        // Controlla se il range di modifica si sovrappone al range del metodo
-                        if (Math.max(startLine, changeStart) <= Math.min(endLine, changeEnd)) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        return false;
+    private static class CommitImpact {
+        boolean touched;
+        int churn;
+        int added;
     }
 
-    // Metodo helper per calcolare Churn e LOC Added
-    private int[] calculateChurnAndLocAdded(RevCommit commit, RevCommit parent, String filePath, int startLine, int endLine) throws IOException {
-        int churn = 0;
-        int locAdded = 0;
-        try (DiffFormatter diffFormatter = new DiffFormatter(DisabledOutputStream.INSTANCE)) {
-            diffFormatter.setRepository(git.getRepository());
-            List<DiffEntry> diffs = diffFormatter.scan(parent.getTree(), commit.getTree());
-            for (DiffEntry diff : diffs) {
-                if (diff.getNewPath().equals(filePath)) {
-                    for (Edit edit : diffFormatter.toFileHeader(diff).toEditList()) {
-                        // Considera solo le modifiche che toccano il metodo
-                        if (Math.max(startLine, edit.getBeginB()) <= Math.min(endLine, edit.getEndB())) {
-                            churn += edit.getLengthA(); // Linee cancellate
-                            churn += edit.getLengthB(); // Linee aggiunte
-                            locAdded += edit.getLengthB();
-                        }
-                    }
-                }
+    private CommitImpact calculateImpactForCommit(List<Edit> edits, int startLine, int endLine) {
+        CommitImpact impact = new CommitImpact();
+        for (Edit e : edits) {
+            int changeStart = e.getBeginB();
+            int changeEnd   = e.getEndB();
+            if (Math.max(startLine, changeStart) <= Math.min(endLine, changeEnd)) {
+                impact.touched = true;
+                impact.churn += e.getLengthA() + e.getLengthB();
+                impact.added += e.getLengthB();
             }
         }
-        return new int[]{churn, locAdded};
+        return impact;
+    }
+
+
+
+    private Map<Path, CompilationUnit> buildCuCache(Set<Path> filesToParse) {
+        Map<Path, CompilationUnit> cuCache = HashMap.newHashMap(filesToParse.size());
+        for (Path p : filesToParse) {
+            if (safeIsJavaFile(p)) {
+                var cu = parseQuietly(p);
+                if (cu != null) cuCache.put(p, cu);
+            }
+        }
+        return cuCache;
     }
 
 
@@ -198,22 +189,20 @@ public class MetricsCalculator {
      * Ritorna una mappa keyMetodo -> fanIn, dove la chiave è "pathRelativo::methodName".
      */
     private Map<String, Integer> computeFanInMapForRelease(Path repoRoot, List<JavaClass> classesInRelease) {
-        // 1) Indici di base e set file da analizzare
         Map<String, JavaMethod> keyToMethod = buildKeyToMethod(classesInRelease);
         Set<Path> filesToParse = collectFilesToParse(repoRoot, classesInRelease);
 
-        // 2) Configura Symbol Solver
         configureSymbolSolver(repoRoot);
 
-        // 3) Prima passata: indicizza dichiarazioni (fallback)
-        Map<String, String> declIndex = buildDeclarationIndex(repoRoot, filesToParse);
+        // NUOVO: parsiamo una sola volta
+        Map<Path, CompilationUnit> cuCache = buildCuCache(filesToParse);
 
-        // 4) Seconda passata: costruisci grafo incoming (callee -> callers)
-        Map<String, Set<String>> incoming = buildIncomingGraph(repoRoot, filesToParse, keyToMethod, declIndex);
+        Map<String, String> declIndex = buildDeclarationIndexFromCache(repoRoot, cuCache);
+        Map<String, Set<String>> incoming = buildIncomingGraphFromCache(repoRoot, cuCache, keyToMethod, declIndex);
 
-        // 5) Aggrega in <key, fanIn>
         return toFanInMap(keyToMethod, incoming);
     }
+
 
     // ------------------------------------------------------------
 // STEP 1: raccolta indici/metadati
@@ -238,6 +227,50 @@ public class MetricsCalculator {
         return filesToParse;
     }
 
+    // --- COMMIT DATA PRECOMPUTATI (per release) ---
+    private static final class CommitData {
+        final boolean weekend;
+        final String authorEmail;
+        final Map<String, List<org.eclipse.jgit.diff.Edit>> editsByPath; // path -> edits
+
+        CommitData(boolean weekend, String authorEmail, Map<String, List<org.eclipse.jgit.diff.Edit>> editsByPath) {
+            this.weekend = weekend;
+            this.authorEmail = authorEmail;
+            this.editsByPath = editsByPath;
+        }
+    }
+
+    private List<CommitData> precomputeCommitData(List<RevCommit> commits) throws IOException {
+        var repo = git.getRepository();
+        List<CommitData> out = new ArrayList<>(commits.size());
+
+        try (var df = new DiffFormatter(DisabledOutputStream.INSTANCE)) {
+            df.setRepository(repo);
+            df.setDetectRenames(true); // importante!
+            for (RevCommit c : commits) {
+                if (c.getParentCount() == 0) continue;
+                RevCommit p = c.getParent(0);
+
+                var editsByPath = new HashMap<String, List<Edit>>();
+                for (DiffEntry de : df.scan(p.getTree(), c.getTree())) {
+                    String path = de.getNewPath();
+                    if (path == null || !path.endsWith(".java")) continue;
+                    var elist = df.toFileHeader(de).toEditList();
+                    if (!elist.isEmpty()) editsByPath.put(path, elist);
+                }
+
+                var dt = LocalDateTime.ofInstant(Instant.ofEpochSecond(c.getCommitTime()), ZoneId.systemDefault())
+                        .getDayOfWeek();
+                boolean weekend = (dt == DayOfWeek.SATURDAY || dt == DayOfWeek.SUNDAY);
+                String author = c.getAuthorIdent() != null ? c.getAuthorIdent().getEmailAddress() : "unknown";
+
+                out.add(new CommitData(weekend, author, editsByPath));
+            }
+        }
+        return out;
+    }
+
+
     // ------------------------------------------------------------
 // STEP 2: configurazione SymbolSolver
 // ------------------------------------------------------------
@@ -251,24 +284,6 @@ public class MetricsCalculator {
                 .setSymbolResolver(new JavaSymbolSolver(typeSolver));
 
         StaticJavaParser.setConfiguration(parserConfiguration);
-    }
-
-
-    // ------------------------------------------------------------
-// STEP 3: prima passata - indice dichiarazioni
-// ------------------------------------------------------------
-    private Map<String, String> buildDeclarationIndex(Path repoRoot, Set<Path> filesToParse) {
-        Map<String, String> declIndex = new HashMap<>();
-        for (Path p : filesToParse) {
-            if (safeIsJavaFile(p)) {
-                CompilationUnit cu = parseQuietly(p);
-                if (cu != null) {
-                    String relPath = toUnix(repoRoot.relativize(p).toString());
-                    indexDeclarationsFromCU(cu, relPath, declIndex);
-                }
-            }
-        }
-        return declIndex;
     }
 
 
@@ -291,30 +306,34 @@ public class MetricsCalculator {
         }
     }
 
+    private Map<String, String> buildDeclarationIndexFromCache(Path repoRoot, Map<Path, CompilationUnit> cuCache) {
+        Map<String, String> declIndex = new HashMap<>();
+        for (var e : cuCache.entrySet()) {
+            Path p = e.getKey();
+            CompilationUnit cu = e.getValue();
+            String relPath = toUnix(repoRoot.relativize(p).toString());
+            indexDeclarationsFromCU(cu, relPath, declIndex);
+        }
+        return declIndex;
+    }
 
-
-    // ------------------------------------------------------------
-// STEP 4: seconda passata - grafo incoming
-// ------------------------------------------------------------
-    private Map<String, Set<String>> buildIncomingGraph(
+    private Map<String, Set<String>> buildIncomingGraphFromCache(
             Path repoRoot,
-            Set<Path> filesToParse,
+            Map<Path, CompilationUnit> cuCache,
             Map<String, JavaMethod> keyToMethod,
             Map<String, String> declIndex
     ) {
         Map<String, Set<String>> incoming = new HashMap<>();
-
-        for (Path p : filesToParse) {
-            if (safeIsJavaFile(p)) {
-                CompilationUnit cu = parseQuietly(p);
-                if (cu != null) {
-                    String relPath = toUnix(repoRoot.relativize(p).toString());
-                    addIncomingEdgesFromCU(cu, relPath, keyToMethod, declIndex, incoming);
-                }
-            }
+        for (var e : cuCache.entrySet()) {
+            Path p = e.getKey();
+            CompilationUnit cu = e.getValue();
+            String relPath = toUnix(repoRoot.relativize(p).toString());
+            addIncomingEdgesFromCU(cu, relPath, keyToMethod, declIndex, incoming);
         }
         return incoming;
     }
+
+
 
 
     private void addIncomingEdgesFromCU(

@@ -262,7 +262,7 @@ public class FileCSVGenerator {
                                         int iteration) {
         String safeFS = toSafeSlug(featureSelection);
         String dir = this.directoryPath + PREDICTION;
-        String fileName = String.format("%s_predictions_iter_%d_%s_%s.csv",
+        String fileName = String.format("%s_predictions_iter_%02d_%s_%s.csv",
                 projName, iteration, toSafeSlug(classifierName), safeFS);
 
         ensureDir(dir);
@@ -284,7 +284,7 @@ public class FileCSVGenerator {
         String dir = this.directoryPath + RESULT;
 
         final String fileName = (iteration != 0)
-                ? String.format("%s_results_iter_%d.csv", projName, iteration)
+                ? String.format("%s_results_iter_%02d.csv", projName, iteration)
                 : String.format("%s_weka_metrics_aggregate.csv", projName);
 
         ensureDir(dir);
@@ -386,7 +386,7 @@ public class FileCSVGenerator {
 
         String safeFS = toSafeSlug(featureSelection);
         File perFsFile = new File(dirPerFS,
-                String.format("%s_fs_iter_%d_%s.csv", projName, iteration, safeFS));
+                String.format("%s_fs_iter_%2d_%s.csv", projName, iteration, safeFS));
 
         // file cumulativo
         String cumulativePath = this.directoryPath + RESULT +
