@@ -159,6 +159,46 @@ public class FileCSVGenerator {
         }
     }
 
+
+    /**
+     * Salva un dataset Weka (Instances) in CSV dentro otherFiles.
+     * Il file si chiamerà: {projName}_{baseName}.csv
+     */
+    public void saveInstancesToOtherFiles(String baseName, Instances data) {
+        String safe = toSafeSlug(baseName == null ? "dataset" : baseName);
+        String fileTitle = this.directoryPath + OTHERFILES + this.projName + "_" + safe + ".csv";
+
+        ensureDir(this.directoryPath + OTHERFILES);
+
+        try (FileWriter fw = new FileWriter(fileTitle)) {
+            // Header: nomi attributi, in ordine
+            int m = data.numAttributes();
+            String[] header = new String[m];
+            for (int j = 0; j < m; j++) {
+                header[j] = data.attribute(j).name();
+            }
+            fw.write(csvLine(header));
+
+            // Righe: rappresentazione testuale dei valori
+            for (int i = 0; i < data.numInstances(); i++) {
+                String[] row = new String[m];
+                for (int j = 0; j < m; j++) {
+                    // toString(j) restituisce la stringa corretta anche per nominal/string/date; gestiamo missing
+                    row[j] = data.instance(i).isMissing(j) ? "" : data.instance(i).toString(j);
+                }
+                fw.write(csvLine(row));
+            }
+
+            Logger.getAnonymousLogger().log(Level.INFO,
+                    "Scritto CSV Instances in: {0}", fileTitle);
+
+        } catch (IOException e) {
+            Logger.getAnonymousLogger().log(Level.SEVERE,
+                    "Errore scrittura CSV per Instances in otherFiles", e);
+        }
+    }
+
+
     private void generateDatasetFile(List<Release> releases, String filePath) {
         try (FileWriter fw = new FileWriter(filePath)) {
             fw.write(csvLine(new String[]{
@@ -459,6 +499,50 @@ public class FileCSVGenerator {
                     "Errore durante il salvataggio del ranking correlazione feature-buggyness", e);
         }
     }
+
+    public void saveInstancesToOtherFilesWithPred(
+            String baseName,
+            Instances data,
+            String predCol,
+            String[] predLabels
+    ) {
+        if (predLabels == null || predLabels.length != data.numInstances()) {
+            Logger.getAnonymousLogger().log(Level.SEVERE,
+                    "Lunghezze non coerenti: predLabels != numInstances");
+            return;
+        }
+
+        String safe = toSafeSlug(baseName == null ? "dataset" : baseName);
+        String fileTitle = this.directoryPath + OTHERFILES + this.projName + "_" + safe + ".csv";
+        ensureDir(this.directoryPath + OTHERFILES);
+
+        try (FileWriter fw = new FileWriter(fileTitle)) {
+            // Header
+            int m = data.numAttributes();
+            String[] header = new String[m + 1];
+            for (int j = 0; j < m; j++) header[j] = data.attribute(j).name();
+            header[m] = (predCol == null || predCol.isBlank()) ? "isBuggy_pred" : predCol;
+            fw.write(csvLine(header));
+
+            // Righe
+            for (int i = 0; i < data.numInstances(); i++) {
+                String[] row = new String[m + 1];
+                for (int j = 0; j < m; j++) {
+                    row[j] = data.instance(i).isMissing(j) ? "" : data.instance(i).toString(j);
+                }
+                row[m] = predLabels[i] == null ? "" : predLabels[i];
+                fw.write(csvLine(row));
+            }
+
+            Logger.getAnonymousLogger().log(Level.INFO,
+                    "Scritto CSV (pred) in: {0}", fileTitle);
+        } catch (IOException e) {
+            Logger.getAnonymousLogger().log(Level.SEVERE,
+                    "Errore scrittura CSV con predizioni in otherFiles", e);
+        }
+    }
+
+
 
 
 }

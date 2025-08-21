@@ -1,6 +1,7 @@
 package it.project.controllers;
 
 
+import it.project.utils.FileCSVGenerator;
 import weka.classifiers.Classifier;
 import weka.classifiers.AbstractClassifier;
 import weka.core.Instance;
@@ -17,44 +18,92 @@ public class SmellImpactAnalyzer {
 
     private static final Logger LOG = Logger.getLogger(SmellImpactAnalyzer.class.getName());
 
+    /*DatasetA = Dataset completo*/
+    /*DatasetB+ = porzione di A contente solo righe con nSmell>0*/
+    /*Dataset B = Dataset B+ in cui setto nSmell = 0*/
+    /*Dataset C = Porzione di A contenente solo righe con nSmell = 0*/
+    // Dentro: it.project.controllers.SmellImpactAnalyzer
+
+    // Overload per retro-compatibilità (nessun salvataggio)
     public void run(String arffPath, Classifier prototype, String smellAttrNameOrNull) throws Exception {
-        // 1) Carica datasetA
+        run(arffPath, prototype, smellAttrNameOrNull, null);
+    }
+
+    // Overload completo con salvataggi via FileCSVGenerator
+    public void run(String arffPath,
+                    Classifier prototype,
+                    String smellAttrNameOrNull,
+                    it.project.utils.FileCSVGenerator csvGen) throws Exception {
+
+        // 1) Carica A e imposta classe
         Instances datasetA = loadArff(arffPath);
         ensureClassSet(datasetA);
 
-        // 2) Individua attributo NSmells
-        int smellIdx = (smellAttrNameOrNull != null)
+        // 2) Trova indice nSmells (forzato o inferito)
+        final int smellIdx = (smellAttrNameOrNull != null)
                 ? indexOfAttrCaseInsensitive(datasetA, smellAttrNameOrNull)
                 : inferSmellIndex(datasetA);
-
         if (smellIdx < 0) {
             throw new IllegalArgumentException("Attributo 'NSmells' non trovato (usa smellAttrNameOrNull per forzarlo).");
         }
-        LOG.log(Level.INFO, "Smell attribute: {0} (index {1})", new Object[]{datasetA.attribute(smellIdx).name(), smellIdx});
+        LOG.log(Level.INFO, "Smell attribute: {0} (index {1})",
+                new Object[]{datasetA.attribute(smellIdx).name(), smellIdx});
 
-        // 3) Costruisci datasetB+ (NSmells > 0), datasetC (NSmells = 0), datasetB (datasetB+ con NSmells=0)
-        Instances datasetBPlus = filterBySmell(datasetA, smellIdx, true);   // > 0
-        Instances datasetC     = filterBySmell(datasetA, smellIdx, false);  // == 0
-        Instances datasetB     = setSmellToZero(datasetBPlus, smellIdx);    // manipolato
+        // 3) Costruisci i sotto-dataset
+        Instances datasetBPlus = filterBySmell(datasetA, smellIdx, true);   // NSmells > 0
+        Instances datasetC     = filterBySmell(datasetA, smellIdx, false);  // NSmells = 0
+        Instances datasetB     = setSmellToZero(datasetBPlus, smellIdx);    // copia di B+ con NSmells=0
 
-        // 4) Allena BClassifier su datasetA
+        // 3.b) Salva SUBITO le versioni “pure” se richiesto
+        if (csvGen != null) {
+            csvGen.saveInstancesToOtherFiles("Bplus", datasetBPlus);
+            csvGen.saveInstancesToOtherFiles("B",      datasetB);
+            csvGen.saveInstancesToOtherFiles("C",      datasetC);
+        }
+
+        // 4) Allena il modello su A
         Classifier model = AbstractClassifier.makeCopy(prototype);
         model.buildClassifier(datasetA);
 
-        // 5) Predici su datasetA, datasetB+, datasetB, datasetC
+        // 5) Calcola metriche sintetiche su A, B+, B, C
         PredictionStats statsA     = predictStats(datasetA, model);
         PredictionStats statsBPlus = predictStats(datasetBPlus, model);
         PredictionStats statsB     = predictStats(datasetB, model);
         PredictionStats statsC     = predictStats(datasetC, model);
 
-        // 6) Calcola “prevenuti” in datasetB+ -> datasetB (stesse istanze, odore azzerato)
+        // 6) Effetto “prevenibile” (B+ vs B)
         PreventableStats prevent = compareBPlusVsB(datasetBPlus, datasetB, model);
 
-        // 7) Stampa tabella riepilogativa (stile semplice)
-        printSummaryTable(statsA, statsB, statsBPlus, statsC, prevent, datasetA.attribute(datasetA.classIndex()).value(positiveIndex(datasetA)));
+        // 7) Stampa riepiloghi
+        printSummaryTable(
+                statsA, statsB, statsBPlus, statsC, prevent,
+                datasetA.attribute(datasetA.classIndex()).value(positiveIndex(datasetA))
+        );
+        // Tabella compatta A/E come nello screenshot
+        printCompactAETable(statsA, statsBPlus, statsB, statsC);
+
+        // 8) Salva le versioni con colonna di predizione (dopo l’addestramento)
+        if (csvGen != null) {
+            saveWithPred(csvGen, "Bplus_with_pred", datasetBPlus, model);
+            saveWithPred(csvGen, "B_with_pred",     datasetB,     model);
+            saveWithPred(csvGen, "C_with_pred",     datasetC,     model);
+        }
     }
 
     /* ==================== CORE ==================== */
+
+    private void saveWithPred(FileCSVGenerator csvGen, String baseName, Instances data, Classifier model) throws Exception {
+        int n = data.numInstances();
+        String[] predLabels = new String[n];
+
+        for (int i = 0; i < n; i++) {
+            double[] dist = model.distributionForInstance(data.instance(i));
+            int yhat = Utils.maxIndex(dist);
+            predLabels[i] = data.classAttribute().value(yhat);
+        }
+
+        csvGen.saveInstancesToOtherFilesWithPred(baseName, data, "isBuggy_pred", predLabels);
+    }
 
     private Instances loadArff(String path) throws Exception {
         DataSource ds = new DataSource(path);
@@ -254,4 +303,30 @@ public class SmellImpactAnalyzer {
             this.propOverBplus = propOverBplus;
         }
     }
+
+
+    private void printCompactAETable(PredictionStats sA,
+                                     PredictionStats sBplus,
+                                     PredictionStats sB,
+                                     PredictionStats sC) {
+        final String nl = System.lineSeparator();
+        StringBuilder sb = new StringBuilder(256);
+
+        // intestazione
+        sb.append(nl);
+        sb.append(String.format("%-10s | %12s | %12s | %12s | %12s%n",
+                "", "Dataset A", "Dataset B+", "Dataset B", "Dataset C"));
+        sb.append("--------------------------------------------------------------------------").append(nl);
+
+        // riga A (Actual)
+        sb.append(String.format("%-10s | %12d | %12d | %12d | %12d%n",
+                "A", sA.actualYes, sBplus.actualYes, sB.actualYes, sC.actualYes));
+
+        // riga E (Estimated)
+        sb.append(String.format("%-10s | %12d | %12d | %12d | %12d%n",
+                "E", sA.predYes, sBplus.predYes, sB.predYes, sC.predYes));
+
+        LOG.log(Level.INFO, sb::toString);
+    }
+
 }

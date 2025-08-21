@@ -24,7 +24,7 @@ public class RepoFactory {
                 String repoUrl = ConfigManager.getRepositoryUrl();
 
                 if (projectName == null || repoUrl == null) {
-                    throw new IOException("PROJECT_NAME o REPOSITORY_URL non trovati in config.properties");
+                    throw new IOException("PROJECT_NAME o REPOSITORY_URL non trovati in configuration.properties");
                 }
 
                 // Usa il nome del progetto per creare una cartella locale unica

@@ -36,7 +36,6 @@ public class WalkForward {
         for(int i = 1; i < loopLimit; i++){
             int trainingSetLastIndex = i;
             int testingSetIndex = i + 1;
-
             Logger.getAnonymousLogger().log(Level.INFO, "--- Iteration {0}: Training on releases 1-{1}, Testing on release {2} ---", new Object[]{i, trainingSetLastIndex, testingSetIndex});
 
             //Training:

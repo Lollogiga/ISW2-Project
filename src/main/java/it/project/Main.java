@@ -18,6 +18,7 @@ public class Main {
     public static void main(String[] args) throws Exception {
         Properties prop = new Properties();
 
+
         try (InputStream input = new FileInputStream("src/main/resources/configuration.properties")) {
             prop.load(input);
         } catch (IOException e) {
@@ -57,18 +58,29 @@ public class Main {
         //AFeatures = LOC/Cyclomatic Complexity
         //BClassifier = random Forest
         //AFMethod = bookkeeper-server/src/main/java/org/apache/bookkeeper/bookie/LedgerCacheImpl.java::flushLedger
-
-        Classifier clf = new weka.classifiers.trees.RandomForest(); // oppure il tuo BClassifier
         SmellImpactAnalyzer analyzer = new SmellImpactAnalyzer();
-        analyzer.run(
-                "src/main/resources/bookkeeper/otherFiles/BOOKKEEPER_fullDataset.arff",
-                clf,
-                "nSmell"
-        );
-
-
+        if(projectName.equals("BOOKKEEPER")) {
+            String arffPath = "src/main/resources/bookkeeper/otherFiles/BOOKKEEPER_fullDataset.arff";
+            Classifier clf = new weka.classifiers.trees.RandomForest();
+            analyzer.run(
+                    arffPath,
+                    clf,
+                    "nSmell",
+                    new FileCSVGenerator(outputPath, projectName)
+            );
+        } else if (projectName.equals("OPENJPA")) {
+            String arffPath = "src/main/resources/openjpa/otherFiles/OPENJPA_fullDataset.arff";
+            Classifier clf = new weka.classifiers.trees.RandomForest();
+            analyzer.run(
+                    arffPath,
+                    clf,
+                    "nSmell",
+                    new FileCSVGenerator(outputPath, projectName)
+            );
+        }
 
     }
+
 
 
 }
