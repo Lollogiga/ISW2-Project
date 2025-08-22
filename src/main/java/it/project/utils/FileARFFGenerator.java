@@ -45,23 +45,36 @@ public class FileARFFGenerator {
     private void csvToARFF(String csvFile, String arffFile) throws Exception {
         Instances data = loadCsv(csvFile);
 
-        // 1) rimuovi sempre index, methodName e methodSignature (case-insensitive)
+        // 1) rimuovi id/nomi
         data = removeByNamesCaseInsensitive(data, "index", "methodname", "methodsignature");
 
 
-        // 2) imposta classe isBuggy (case-insensitive); se non trovata -> ultima colonna
+        // 3) imposta classe (case-insensitive)
         setClassCaseInsensitive(data, "isbuggy");
 
-        // 3) porta la classe in ultima posizione
+        // 4) porta la classe in ultima posizione
         data = moveClassToLast(data);
 
-        // 4) quick clean: elimina attributi costanti/duplicati
-        data = applyRemoveUseless(data);
+        // 5) pulizia veloce ma SENZA rimuovere costanti
+        data = applyRemoveUseless(data); // ora NON tocca le costanti (grazie a -M 0.0)
 
-        // 5) salva ARFF
+        // 2) assicurati che le colonne-chiave esistano SEMPRE (zero se mancano)
+        ensureNumericAttrInPlace(data, "WeekendCommit", 0.0);
+
+        // 6) ordine canonico (opzionale ma consigliato: schema fisso)
+        data = reorderByNames(
+                data,
+                java.util.List.of(
+                        "LOC","CyclomaticComplexity","Churn","LocAdded","fan-in","fan-out",
+                        "NewcomerRisk","Auth","WeekendCommit","nSmell" // prima della classe
+                )
+        );
+
+        // 7) salva
         saveArff(data, arffFile);
         LOG.log(Level.INFO, "ARFF scritto: {0}", arffFile);
     }
+
 
     /* =============== helpers =============== */
 
@@ -147,19 +160,17 @@ public class FileARFFGenerator {
         }
         order.append(cls + 1);
 
-        Reorder reorder = new Reorder();
-        reorder.setOptions(new String[]{"-R", order.toString()});
-        reorder.setInputFormat(data);
-        Instances out = Filter.useFilter(data, reorder);
-        out.setClassIndex(out.numAttributes() - 1);
-        return out;
+        return getInstances(data, order);
     }
 
     private Instances applyRemoveUseless(Instances data) throws Exception {
         RemoveUseless ru = new RemoveUseless();
+        // Non rimuovere attributi a varianza 0 (es. WeekendCommit tutto zero)
+        ru.setOptions(new String[] { "-M", "0.0" });
         ru.setInputFormat(data);
         return Filter.useFilter(data, ru);
     }
+
 
     public void csvToARFFFull() throws Exception {
         String base = PATH + projectName.toLowerCase() + "/otherFiles/";
@@ -167,5 +178,55 @@ public class FileARFFGenerator {
         String arffFile = base + projectName + "_fullDataset.arff"; // destinazione ARFF
         csvToARFF(csvFile, arffFile);
     }
+
+    // --- helpers robustezza ---
+
+    /** Se manca un attributo numerico, lo crea e lo riempie con defaultVal. Ritorna sempre l'istanza (modificata in-place). */
+    private static void ensureNumericAttrInPlace(Instances ds, String name, double defaultVal) {
+        if (ds.attribute(name) != null) return;
+        weka.core.Attribute attr = new weka.core.Attribute(name);
+        ds.insertAttributeAt(attr, ds.numAttributes());
+        int idx = ds.attribute(name).index();
+        for (int i = 0; i < ds.numInstances(); i++) {
+            ds.instance(i).setValue(idx, defaultVal);
+        }
+    }
+
+
+    /** Riordina gli attributi nell'ordine esatto fornito (1-based list per Reorder). Ignora i nomi non presenti. */
+    private static Instances reorderByNames(Instances data, java.util.List<String> desiredOrder) throws Exception {
+        java.util.List<Integer> order1Based = new java.util.ArrayList<>();
+        for (String nm : desiredOrder) {
+            if (data.attribute(nm) != null) {
+                order1Based.add(data.attribute(nm).index() + 1);
+            }
+        }
+        // aggiungi eventuali rimanenti non specificati (tranne la classe, che sposteremo dopo)
+        int cls = data.classIndex();
+        for (int i = 0; i < data.numAttributes(); i++) {
+            if (i == cls) continue;
+            int one = i + 1;
+            if (!order1Based.contains(one)) order1Based.add(one);
+        }
+        // classe in coda
+        order1Based.add(cls + 1);
+
+        StringBuilder spec = new StringBuilder();
+        for (int k = 0; k < order1Based.size(); k++) {
+            if (k > 0) spec.append(",");
+            spec.append(order1Based.get(k));
+        }
+        return getInstances(data, spec);
+    }
+
+    private static Instances getInstances(Instances data, StringBuilder spec) throws Exception {
+        Reorder r = new Reorder();
+        r.setOptions(new String[]{"-R", spec.toString()});
+        r.setInputFormat(data);
+        Instances out = Filter.useFilter(data, r);
+        out.setClassIndex(out.numAttributes() - 1);
+        return out;
+    }
+
 
 }
