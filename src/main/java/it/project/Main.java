@@ -43,7 +43,7 @@ public class Main {
             new SpearmanCorrelation(projectName).run();
             FileCSVGenerator csvGenerator = new FileCSVGenerator(outputPath, projectName);
             WekaClassifier wekaClassifier = new WekaClassifier(projectName, csvGenerator);
-            wekaClassifier.fetchWekaAnalysis();
+            /*wekaClassifier.fetchWekaAnalysis();*/
             String path = Paths.get(outputPath)
                     .resolve(projectName.toLowerCase())
                     + File.separator;
@@ -51,7 +51,7 @@ public class Main {
             if(Objects.equals(projectName, "BOOKKEEPER")) {
                 path += "training/ARFF/BOOKKEEPER_training_iter_4.arff";
             }else{
-                path += outputPath + "training/ARFF/OPENJPA_training_iter_4.arff";
+                path += "training/ARFF/OPENJPA_training_iter_15.arff";
             }
             wekaClassifier.runAndSaveFeatureCorrelationRanking(path, 20);
         }
