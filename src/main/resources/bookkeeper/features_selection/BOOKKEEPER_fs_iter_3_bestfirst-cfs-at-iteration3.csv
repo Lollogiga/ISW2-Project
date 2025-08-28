@@ -1,7 +1,0 @@
-"rank","attribute_name","attribute_index"
-"1","CyclomaticComplexity","1"
-"2","Churn","2"
-"3","LocAdded","3"
-"4","fan-in","4"
-"5","fan-out","5"
-"6","nSmell","9"

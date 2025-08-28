@@ -41,8 +41,8 @@ public class DatasetCreation {
         // Log debug FV=1
         logTicketsFixedInFirstRelease(ticketList);
 
-        // Anti-snoring (40%)
-        List<Release> releaseToProcess = selectHeadReleases(releaseList, 0.40);
+        // Anti-snoring (34%)
+        List<Release> releaseToProcess = selectHeadReleases(releaseList, 0.34);
 
         // Link ticket-commit + export riassunto
         LOG.info("Data extraction: Tickets Summary");

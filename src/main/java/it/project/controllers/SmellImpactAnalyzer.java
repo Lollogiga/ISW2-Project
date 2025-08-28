@@ -3,7 +3,6 @@ package it.project.controllers;
 
 import it.project.utils.FileCSVGenerator;
 import weka.classifiers.Classifier;
-import weka.classifiers.AbstractClassifier;
 import weka.core.Instance;
 import weka.core.Instances;
 import weka.core.Utils;
@@ -14,9 +13,19 @@ import java.util.Objects;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import weka.filters.Filter;
+import weka.filters.supervised.instance.SpreadSubsample;
+
+
 public class SmellImpactAnalyzer {
 
     private static final Logger LOG = Logger.getLogger(SmellImpactAnalyzer.class.getName());
+
+    // ==== Under-sampling config ====
+
+    private static final int    UNDER_SEED   = 42;   // per riproducibilità
+    private static final boolean SAVE_BALANCED_A = false; // metti true se vuoi salvare A_balanced
+
 
     /*DatasetA = Dataset completo*/
     /*DatasetB+ = porzione di A contente solo righe con nSmell>0*/
@@ -26,14 +35,15 @@ public class SmellImpactAnalyzer {
 
     // Overload per retro-compatibilità (nessun salvataggio)
     public void run(String arffPath, Classifier prototype, String smellAttrNameOrNull) throws Exception {
-        run(arffPath, prototype, smellAttrNameOrNull, null);
+        run(arffPath, prototype, smellAttrNameOrNull, null, 1);
     }
 
     // Overload completo con salvataggi via FileCSVGenerator
     public void run(String arffPath,
                     Classifier prototype,
                     String smellAttrNameOrNull,
-                    it.project.utils.FileCSVGenerator csvGen) throws Exception {
+                    FileCSVGenerator csvGen,
+                    double ratio) throws Exception {
 
         // 1) Carica A e imposta classe
         Instances datasetA = loadArff(arffPath);
@@ -61,9 +71,8 @@ public class SmellImpactAnalyzer {
             csvGen.saveInstancesToOtherFiles("C",      datasetC);
         }
 
-        // 4) Allena il modello su A
-        Classifier model = AbstractClassifier.makeCopy(prototype);
-        model.buildClassifier(datasetA);
+        // 4) Allena il modello su A (ma bilanciando SOLO una copia per il training)
+        Classifier model = buildModelWithUnderSampling(prototype, datasetA, csvGen, ratio);
 
         // 5) Calcola metriche sintetiche su A, B+, B, C
         PredictionStats statsA     = predictStats(datasetA, model);
@@ -156,17 +165,23 @@ public class SmellImpactAnalyzer {
         return out;
     }
 
+
     private Instances setSmellToZero(Instances src, int smellIdx) {
-        Instances out = new Instances(src);
-        for (int i = 0; i < out.numInstances(); i++) {
-            out.instance(i).setValue(smellIdx, 0.0);
+        Instances out = new Instances(src, 0);
+
+        for (int i = 0; i < src.numInstances(); i++) {
+            // COPIA PROFONDA dell'istanza
+            Instance copy = (Instance) src.instance(i).copy();
+            // setta NSmells = 0 (numeric) oppure la prima categoria (nominal)
+            copy.setValue(smellIdx, 0.0);
+            out.add(copy);
         }
         out.setClassIndex(src.classIndex());
         return out;
     }
 
+
     private int positiveIndex(Instances data) {
-        // preferisci il valore "yes" (case-insensitive). Se non c'è, usa l'indice 1.
         for (int k = 0; k < data.classAttribute().numValues(); k++) {
             if ("yes".equalsIgnoreCase(data.classAttribute().value(k))) return k;
         }
@@ -319,8 +334,8 @@ public class SmellImpactAnalyzer {
         sb.append("--------------------------------------------------------------------------").append(nl);
 
         // riga A (Actual)
-        sb.append(String.format("%-10s | %12d | %12d | %12d | %12d%n",
-                "A", sA.actualYes, sBplus.actualYes, sB.actualYes, sC.actualYes));
+        sb.append(String.format("%-10s | %12d | %12d | %12s | %12d%n",
+                "A", sA.actualYes, sBplus.actualYes, "-", sC.actualYes));
 
         // riga E (Estimated)
         sb.append(String.format("%-10s | %12d | %12d | %12d | %12d%n",
@@ -328,5 +343,65 @@ public class SmellImpactAnalyzer {
 
         LOG.log(Level.INFO, sb::toString);
     }
+
+    // Porta tutti i pesi a 1.0: alcuni filtri/learner non gradiscono pesi diversi
+    private static void clearInstanceWeightsInPlace(Instances data) {
+        for (int i = 0; i < data.numInstances(); i++) {
+            data.instance(i).setWeight(1.0);
+        }
+    }
+
+    // Conta le istanze per ciascun valore della classe
+    private static int[] classCounts(Instances data) {
+        int clsIdx = data.classIndex();
+        int k = data.classAttribute().numValues();
+        int[] cnt = new int[k];
+        for (int i = 0; i < data.numInstances(); i++) {
+            cnt[(int) data.instance(i).value(clsIdx)]++;
+        }
+        return cnt;
+    }
+
+
+    // === FACTORY: costruisce il modello addestrando su A sotto-campionata ===
+    private Classifier buildModelWithUnderSampling(Classifier prototype,
+                                                   Instances datasetA,
+                                                   FileCSVGenerator csvGen,
+                                                   double ratio ) throws Exception {
+        // Copia di A per il solo training
+        Instances train = new Instances(datasetA);
+        train.setClassIndex(datasetA.classIndex());
+        clearInstanceWeightsInPlace(train);
+
+        // Log distribuzione prima
+        int[] before = classCounts(train);
+        LOG.log(Level.INFO, "Class dist (train BEFORE undersampling): {0}",
+                java.util.Arrays.toString(before));
+
+        // Under-sampling della maggioranza: obiettivo 1:1
+        SpreadSubsample ss = new SpreadSubsample();
+        ss.setDistributionSpread(ratio); // 1.0 => uniforme
+        ss.setRandomSeed(UNDER_SEED);
+        ss.setInputFormat(train);
+
+        Instances balanced = Filter.useFilter(train, ss);
+        balanced.setClassIndex(train.classIndex());
+
+        // Log distribuzione dopo
+        int[] after = classCounts(balanced);
+        LOG.log(Level.INFO, "Class dist (train AFTER undersampling):  {0}  | size {1}->{2}",
+                new Object[]{java.util.Arrays.toString(after), train.numInstances(), balanced.numInstances()});
+
+        // (opzionale) salva il training bilanciato per audit
+        if (SAVE_BALANCED_A && csvGen != null) {
+            csvGen.saveInstancesToOtherFiles("A_underSampled", balanced);
+        }
+
+        // Addestramento sul BILANCIATO
+        Classifier m = weka.classifiers.AbstractClassifier.makeCopy(prototype);
+        m.buildClassifier(balanced);
+        return m;
+    }
+
 
 }

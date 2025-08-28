@@ -1,0 +1,6 @@
+"rank","attribute_name","attribute_index"
+"1","LOC","0"
+"2","CyclomaticComplexity","1"
+"3","LocAdded","3"
+"4","fan-out","5"
+"5","Auth","7"

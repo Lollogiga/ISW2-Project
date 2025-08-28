@@ -31,7 +31,7 @@ public class WalkForward {
         Logger.getAnonymousLogger().log(Level.INFO, "Starting walk forward...");
 
         int totalReleases = fullReleaseList.size();
-        int loopLimit = (int) Math.round(totalReleases * 0.40);
+        int loopLimit = (int) Math.round(totalReleases * 0.34);
 
         for(int i = 1; i < loopLimit; i++){
             int trainingSetLastIndex = i;
