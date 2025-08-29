@@ -1,0 +1,168 @@
+private static final int FLUSH_THRESHOLD_BYTES = 512 * 1024;
+
+public void run() {
+    final LinkedList<QueueEntry> toFlush = new LinkedList<>();
+    final ByteBuffer lenBuff = ByteBuffer.allocate(4);
+    final JournalIO io = new JournalIO(journalDirectory, maxJournalSize);
+
+    long lastFlushPos = 0L;
+    long logId = 0L;
+    QueueEntry qe = null;
+
+    try {
+        while (true) {
+            // Apri log se necessario; se apre, azzera il puntatore di flush
+            long opened = ensureOpen(io);
+            if (opened != Long.MIN_VALUE) {
+                logId = opened;
+                lastFlushPos = 0L;
+            }
+
+            if (shouldStop()) break;
+
+            if (qe == null) {
+                qe = getNextQueueEntry(toFlush);
+                if (qe == null) {
+                    // flush opportunistico + rotate incapsulati
+                    lastFlushPos = maybeFlushAndRotate(io, logId, toFlush, lastFlushPos);
+                    if (shouldStop()) break;
+                    continue;
+                }
+            }
+
+            if (shouldStop()) break;
+
+            writeEntry(io, lenBuff, qe);
+            toFlush.add(qe);
+            qe = null;
+
+            lastFlushPos = maybeFlushAndRotate(io, logId, toFlush, lastFlushPos);
+        }
+    } catch (IOException | InterruptedException e) {
+        if (e instanceof InterruptedException) {
+            LOG.warn("Journal exits when shutting down", e);
+            Thread.currentThread().interrupt();
+        } else {
+            LOG.error("I/O exception in Journal thread!", e);
+        }
+    } finally {
+        io.closeQuietly(LOG);
+    }
+}
+
+/* =================== Helpers =================== */
+
+private long ensureOpen(JournalIO io) throws IOException {
+    if (!io.isOpen()) {
+        long newLogId = System.currentTimeMillis();
+        io.open(newLogId);
+        return newLogId;
+    }
+    return Long.MIN_VALUE; // sentinel: nessuna apertura
+}
+
+private QueueEntry getNextQueueEntry(LinkedList<QueueEntry> toFlush) throws InterruptedException {
+    // Evita il ternario dentro run(): la decisione è spostata qui
+    if (toFlush.isEmpty()) {
+        return queue.take();
+    } else {
+        return queue.poll();
+    }
+}
+
+private long maybeFlushAndRotate(JournalIO io, long logId,
+                                 LinkedList<QueueEntry> toFlush,
+                                 long lastFlushPos) throws IOException {
+    if (shouldFlush(io, lastFlushPos, toFlush)) {
+        long newPos = flushAndAck(io, logId, toFlush);
+        if (shouldRotate(io)) {
+            io.rotate();
+        }
+        return newPos;
+    }
+    return lastFlushPos;
+}
+
+private boolean shouldStop() {
+    if (!running) {
+        LOG.info("Journal Manager is asked to shut down, quit.");
+        return true;
+    }
+    return false;
+}
+
+
+/* === Helpers: meno dipendenze dirette nel corpo di run() === */
+
+private boolean shouldFlush(JournalIO io, long lastFlushPos, LinkedList<QueueEntry> toFlush) throws IOException {
+    if (toFlush.isEmpty()) return false;
+    return io.position() > lastFlushPos + FLUSH_THRESHOLD_BYTES;
+}
+
+private boolean shouldRotate(JournalIO io) throws IOException {
+    return io.position() > io.maxJournalSize();
+}
+
+private long flushAndAck(JournalIO io, long logId, LinkedList<QueueEntry> toFlush) throws IOException {
+    io.flush(true);
+    long newPos = io.position();
+    lastLogMark.setLastLogMark(logId, newPos);
+    for (QueueEntry e : toFlush) {
+        e.cb.writeComplete(0, e.ledgerId, e.entryId, null, e.ctx);
+    }
+    toFlush.clear();
+    return newPos;
+}
+
+private void writeEntry(JournalIO io, ByteBuffer lenBuff, QueueEntry qe) throws IOException {
+    lenBuff.clear();
+    lenBuff.putInt(qe.entry.remaining());
+    lenBuff.flip();
+    io.write(lenBuff);
+    io.write(qe.entry);
+    io.preAllocIfNeeded();
+}
+
+/* Facade minimale per accorpare le chiamate I/O → riduce la fan-out di run() */
+private static final class JournalIO {
+    private final File journalDirectory;
+    private final long maxJournalSize;
+    private JournalChannel logFile;
+    private BufferedChannel bc;
+
+    JournalIO(File journalDirectory, long maxJournalSize) {
+        this.journalDirectory = journalDirectory;
+        this.maxJournalSize = maxJournalSize;
+    }
+
+    boolean isOpen() { return logFile != null; }
+
+    void open(long logId) throws IOException {
+        this.logFile = new JournalChannel(journalDirectory, logId);
+        this.bc = logFile.getBufferedChannel();
+    }
+
+    void write(ByteBuffer buf) throws IOException { bc.write(buf); }
+
+    void flush(boolean metadata) throws IOException { bc.flush(metadata); }
+
+    long position() throws IOException { return bc.position(); }
+
+    void preAllocIfNeeded() throws IOException { logFile.preAllocIfNeeded(); }
+
+    long maxJournalSize() { return maxJournalSize; }
+
+    void rotate() throws IOException {
+        if (logFile != null) {
+            logFile.close();
+            logFile = null;
+            bc = null;
+        }
+    }
+
+    void closeQuietly(org.slf4j.Logger log) {
+        IOUtils.close(log, logFile);
+        logFile = null;
+        bc = null;
+    }
+}

@@ -1,0 +1,377 @@
+// Campo di classe (inizializzato dove appropriato, es. nel costruttore)
+private final EvalOps ops = new EvalOps();
+
+private Object eval(JPQLNode node) {
+    // Variabili locali minime (evitiamo temporanei superflui)
+    switch (node.id) {
+        /* -------------------- Pass-through / strutturali -------------------- */
+        case JJTSCALAREXPRESSION:
+        case JJTCASE:
+        case JJTAGGREGATE:
+        case JJTSELECTEXTENSION:
+        case JJTGROUPBYEXTENSION:
+        case JJTORDERBYEXTENSION:
+            return eval(onlyChild(node));
+
+        case JJTWHERE:
+            return getExpression(onlyChild(node));
+
+        /* -------------------- Tipi e identificatori -------------------- */
+        case JJTTYPE:
+            return getType(onlyChild(node));
+        case JJTTYPELITERAL:
+            return getTypeLiteral(node);
+        case JJTCLASSNAME:
+        case JJTPATH:
+            return getPathOrConstant(node);
+        case JJTIDENTIFIER:
+        case JJTIDENTIFICATIONVARIABLE:
+            return getIdentifier(node);
+        case JJTQUALIFIEDPATH:
+            return getQualifiedPath(node);
+        case JJTQUALIFIEDIDENTIFIER:
+            return getQualifiedIdentifier(node);
+        case JJTGENERALIDENTIFIER:
+            if (node.parent.parent.id == JJTWHERE || node.parent.id == JJTGROUPBY)
+                return getGeneralIdentifier(onlyChild(node), true);
+            return getQualifiedIdentifier(onlyChild(node));
+
+        /* -------------------- Letterali -------------------- */
+        case JJTBOOLEANLITERAL:
+            return ops.boolLiteral(node);
+        case JJTINTEGERLITERAL:
+            return ops.integerLiteral(node);
+        case JJTDECIMALLITERAL:
+            return ops.decimalLiteral(node);
+        case JJTSTRINGLITERAL:
+        case JJTTRIMCHARACTER:
+        case JJTESCAPECHARACTER:
+            return ops.stringLiteral(node);
+
+        case JJTDATELITERAL:
+            return factory.newLiteral(node.text, Literal.TYPE_DATE);
+        case JJTTIMELITERAL:
+            return factory.newLiteral(node.text, Literal.TYPE_TIME);
+        case JJTTIMESTAMPLITERAL:
+            return factory.newLiteral(node.text, Literal.TYPE_TIMESTAMP);
+
+        /* -------------------- Parametri -------------------- */
+        case JJTNAMEDINPUTPARAMETER:
+            return getParameter(onlyChild(node).text, false, false);
+        case JJTPOSITIONALINPUTPARAMETER:
+            return getParameter(node.text, true, false);
+        case JJTCOLLECTIONPARAMETER: {
+            JPQLNode child = onlyChild(node);
+            boolean positional = child.id == JJTPOSITIONALINPUTPARAMETER;
+            if (!positional) child = onlyChild(child);
+            return getParameter(child.text, positional, true);
+        }
+
+        /* -------------------- Logici -------------------- */
+        case JJTOR:
+            return ops.logicalOr(getExpression(left(node)), getExpression(right(node)));
+        case JJTAND:
+            return ops.logicalAnd(getExpression(left(node)), getExpression(right(node)));
+        case JJTNOT:
+            return factory.not(getExpression(onlyChild(node)));
+
+        /* -------------------- Confronti -------------------- */
+        case JJTEQUALS:
+            return ops.compare(left(node), right(node), ops::eq);
+        case JJTNOTEQUALS:
+            return ops.compare(left(node), right(node), ops::neq);
+        case JJTLESSTHAN:
+            return ops.compare(left(node), right(node), ops::lt);
+        case JJTLESSOREQUAL:
+            return ops.compare(left(node), right(node), ops::le);
+        case JJTGREATERTHAN:
+            return ops.compare(left(node), right(node), ops::gt);
+        case JJTGREATEROREQUAL:
+            return ops.compare(left(node), right(node), ops::ge);
+
+        /* -------------------- Aritmetica -------------------- */
+        case JJTADD:
+            return ops.numeric(left(node), right(node), ops::add);
+        case JJTSUBTRACT:
+            return ops.numeric(left(node), right(node), ops::sub);
+        case JJTMULTIPLY:
+            return ops.numeric(left(node), right(node), ops::mul);
+        case JJTDIVIDE:
+            return ops.numeric(left(node), right(node), ops::div);
+        case JJTMOD:
+            return ops.numeric(left(node), right(node), ops::mod);
+
+        /* -------------------- Stringhe / funzioni -------------------- */
+        case JJTLIKE:
+            return ops.like(node);
+        case JJTTRIM:
+            return ops.trim(node);
+        case JJTCONCAT: {
+            Value v1 = getValue(left(node));
+            Value v2 = getValue(right(node));
+            ops.str(v1); ops.str(v2);
+            return factory.concat(v1, v2);
+        }
+        case JJTSUBSTRING:
+            return ops.substring(node);
+        case JJTLOCATE:
+            return ops.locate(node);
+        case JJTUPPER: {
+            Value v = getValue(onlyChild(node));
+            ops.str(v);
+            return factory.toUpperCase(v);
+        }
+        case JJTLOWER:
+            return factory.toLowerCase(getStringValue(onlyChild(node)));
+        case JJTLENGTH:
+            return factory.stringLength(getStringValue(onlyChild(node)));
+
+        /* -------------------- Collezioni / NULL / quantificatori -------------------- */
+        case JJTBETWEEN:
+            return ops.between(node);
+        case JJTIN:
+            return ops.in(node);
+        case JJTISNULL:
+            return ops.isNull(node);
+        case JJTISEMPTY:
+            return ops.isEmpty(node);
+        case JJTSIZE:
+            return factory.size(getValue(onlyChild(node)));
+        case JJTINDEX:
+            return factory.index(getValue(onlyChild(node)));
+
+        /* -------------------- Aggregazioni e subquery -------------------- */
+        case JJTCOUNT: {
+            JPQLNode c = lastChild(node);
+            if (c.id == JJTIDENTIFIER) return factory.count(getPath(node, false, true));
+            return factory.count(getValue(c));
+        }
+        case JJTMAX:
+            return factory.max(getNumberValue(onlyChild(node)));
+        case JJTMIN:
+            return factory.min(getNumberValue(onlyChild(node)));
+        case JJTSUM:
+            return factory.sum(getNumberValue(onlyChild(node)));
+        case JJTAVERAGE:
+            return factory.avg(getNumberValue(onlyChild(node)));
+        case JJTDISTINCTPATH:
+            return factory.distinct(getValue(onlyChild(node)));
+        case JJTEXISTS:
+            return factory.isNotEmpty((Value) eval(onlyChild(node)));
+        case JJTANY:
+            return factory.any((Value) eval(onlyChild(node)));
+        case JJTALL:
+            return factory.all((Value) eval(onlyChild(node)));
+        case JJTSUBSELECT:
+            return getSubquery(node);
+
+        /* -------------------- Temporal current -------------------- */
+        case JJTCURRENTDATE:
+            return factory.getCurrentDate(Date.class);
+        case JJTCURRENTTIME:
+            return factory.getCurrentTime(Time.class);
+        case JJTCURRENTTIMESTAMP:
+            return factory.getCurrentTimestamp(Timestamp.class);
+
+        /* -------------------- Member of -------------------- */
+        case JJTMEMBEROF: {
+            Value v1 = getValue(left(node), VAR_PATH);
+            Value v2 = getValue(right(node), VAR_PATH);
+            checkEmbeddable(v2);
+            setImplicitContainsTypes(v2, v1, CONTAINS_TYPE_ELEMENT);
+            boolean not = node.not;
+            return evalNot(not, factory.contains(v2, v1));
+        }
+
+        /* -------------------- Fallback -------------------- */
+        default:
+            throw parseException(EX_FATAL, "bad-tree", new Object[]{ node }, null);
+    }
+}
+
+/* =================== Facade: EvalOps =================== */
+private final class EvalOps {
+    /* --- letterali --- */
+    Object boolLiteral(JPQLNode node) {
+        Boolean b = "true".equalsIgnoreCase(node.text) ? Boolean.TRUE : Boolean.FALSE;
+        return factory.newLiteral(b, Literal.TYPE_BOOLEAN);
+    }
+    Object integerLiteral(JPQLNode node) {
+        BigDecimal intlit = new BigDecimal(
+            node.text.endsWith("l") || node.text.endsWith("L")
+                ? node.text.substring(0, node.text.length() - 1)
+                : node.text
+        ).multiply(new BigDecimal(negative(node)));
+        return factory.newLiteral(Long.valueOf(intlit.longValue()), Literal.TYPE_NUMBER);
+    }
+    Object decimalLiteral(JPQLNode node) {
+        BigDecimal declit = new BigDecimal(
+            node.text.endsWith("d") || node.text.endsWith("D") ||
+            node.text.endsWith("f") || node.text.endsWith("F")
+                ? node.text.substring(0, node.text.length() - 1)
+                : node.text
+        ).multiply(new BigDecimal(negative(node)));
+        return factory.newLiteral(declit, Literal.TYPE_NUMBER);
+    }
+    Object stringLiteral(JPQLNode node) {
+        return factory.newLiteral(trimQuotes(node.text), Literal.TYPE_SQ_STRING);
+    }
+
+    /* --- helper tipi --- */
+    void num(Value v) { setImplicitType(v, TYPE_NUMBER); }
+    void str(Value v) { setImplicitType(v, TYPE_STRING); }
+    void unify(Value v1, Value v2, Class<?> targetOrNull) { setImplicitTypes(v1, v2, targetOrNull); }
+
+    /* --- confronti binari --- */
+    Object compare(JPQLNode l, JPQLNode r, BiFunction<Value,Value,Expression> op) {
+        Value v1 = getValue(l);
+        Value v2 = getValue(r);
+        unify(v1, v2, null);
+        return op.apply(v1, v2);
+    }
+    Expression eq(Value a, Value b)  { return factory.equal(a, b); }
+    Expression neq(Value a, Value b) { return factory.notEqual(a, b); }
+    Expression lt(Value a, Value b)  { return factory.lessThan(a, b); }
+    Expression le(Value a, Value b)  { return factory.lessThanEqual(a, b); }
+    Expression gt(Value a, Value b)  { return factory.greaterThan(a, b); }
+    Expression ge(Value a, Value b)  { return factory.greaterThanEqual(a, b); }
+
+    /* --- aritmetica binaria --- */
+    Object numeric(JPQLNode l, JPQLNode r, BiFunction<Value,Value,Expression> op) {
+        Value v1 = getValue(l);
+        Value v2 = getValue(r);
+        unify(v1, v2, TYPE_NUMBER);
+        return op.apply(v1, v2);
+    }
+    Expression add(Value a, Value b) { return factory.add(a, b); }
+    Expression sub(Value a, Value b) { return factory.subtract(a, b); }
+    Expression mul(Value a, Value b) { return factory.multiply(a, b); }
+    Expression div(Value a, Value b) { return factory.divide(a, b); }
+    Expression mod(Value a, Value b) { return factory.mod(a, b); }
+
+    /* --- logici --- */
+    Object logicalAnd(Expression a, Expression b) { return and(a, b); }
+    Object logicalOr(Expression a, Expression b)  { return factory.or(a, b); }
+
+    /* --- BETWEEN --- */
+    Object between(JPQLNode node) {
+        Value v1 = getValue(child(node, 0, 3));
+        Value v2 = getValue(child(node, 1, 3));
+        Value v3 = getValue(child(node, 2, 3));
+        unify(v1, v2, null);
+        unify(v1, v3, null);
+        boolean not = node.not;
+        return evalNot(not, and(factory.greaterThanEqual(v1, v2),
+                                factory.lessThanEqual(v1, v3)));
+    }
+
+    /* --- IN --- */
+    Object in(JPQLNode node) {
+        Iterator<JPQLNode> it = node.iterator();
+        JPQLNode first = it.next(); // path
+        Value v1 = getValue(first);
+        Expression inExp = null;
+        while (it.hasNext()) {
+            JPQLNode next = it.next();
+            Value v2 = (first.id == JJTTYPE && next.id == JJTTYPELITERAL)
+                    ? getTypeLiteral(next)
+                    : getValue(next);
+
+            // caso speciale: IN (subquery) o IN (singolo valore)
+            if (!(v2 instanceof Literal) && node.getChildCount() == 2)
+                return evalNot(node.not, factory.contains(v2, v1));
+
+            unify(v1, v2, null);
+            Expression eq = factory.equal(v1, v2);
+            inExp = (inExp == null) ? eq : factory.or(inExp, eq);
+        }
+        // filtro dei NULL atteso dal CTS
+        return and(evalNot(node.not, inExp),
+                   factory.notEqual(v1, factory.getNull()));
+    }
+
+    /* --- IS [NOT] NULL --- */
+    Object isNull(JPQLNode node) {
+        Value v = getValue(onlyChild(node));
+        checkEmbeddable(v);
+        boolean not = node.not;
+        return not ? factory.notEqual(v, factory.getNull())
+                   : factory.equal(v, factory.getNull());
+    }
+
+    /* --- LIKE --- */
+    Object like(JPQLNode node) {
+        Value v1 = getValue(left(node));
+        Value v2 = getValue(right(node));
+        str(v1); str(v2);
+        String escape = null;
+        JPQLNode en = right(node).findChildByID(JJTESCAPECHARACTER, true);
+        if (en != null) escape = trimQuotes(onlyChild(en).text);
+        return node.not
+                ? factory.notMatches(v1, v2, "_", "%", escape)
+                : factory.matches(v1, v2, "_", "%", escape);
+    }
+
+    /* --- TRIM --- */
+    Object trim(JPQLNode node) {
+        Value v = getValue(lastChild(node));
+        str(v);
+        Boolean where = null;
+        JPQLNode first = firstChild(node);
+        if (node.getChildCount() > 1) {
+            where = first.id == JJTTRIMLEADING ? Boolean.TRUE
+                  : first.id == JJTTRIMTRAILING ? Boolean.FALSE
+                  : null;
+        }
+        Value trimChar;
+        if (node.getChildCount() == 3) {
+            trimChar = getValue(secondChild(node));
+        } else if (node.getChildCount() == 2
+                && first.id != JJTTRIMLEADING
+                && first.id != JJTTRIMTRAILING
+                && first.id != JJTTRIMBOTH) {
+            trimChar = getValue(firstChild(node));
+        } else {
+            trimChar = factory.newLiteral(" ", Literal.TYPE_STRING);
+        }
+        return factory.trim(v, trimChar, where);
+    }
+
+    /* --- SUBSTRING / LOCATE --- */
+    Object substring(JPQLNode node) {
+        Value v1, v2, v3 = null;
+        if (node.children.length == 3) {
+            v1 = getValue(child(node, 0, 3));
+            v2 = getValue(child(node, 1, 3));
+            v3 = getValue(child(node, 2, 3));
+        } else {
+            v1 = getValue(child(node, 0, 2));
+            v2 = getValue(child(node, 1, 2));
+        }
+        str(v1);
+        setImplicitType(v2, Integer.TYPE);
+        if (v3 != null) setImplicitType(v3, Integer.TYPE);
+        return convertSubstringArguments(factory, v1, v2, v3);
+    }
+
+    Object locate(JPQLNode node) {
+        Value path = getValue(firstChild(node));
+        Value search = getValue(secondChild(node));
+        Value fromIdx = null;
+        if (node.getChildCount() > 2) fromIdx = getValue(thirdChild(node));
+        str(path); str(search);
+        if (fromIdx != null) setImplicitType(fromIdx, TYPE_STRING);
+        return factory.add(
+                factory.indexOf(search,
+                        fromIdx == null ? path
+                                : factory.newArgumentList(path,
+                                  factory.subtract(fromIdx,
+                                      factory.newLiteral(Numbers.valueOf(1), Literal.TYPE_NUMBER)))),
+                factory.newLiteral(Numbers.valueOf(1), Literal.TYPE_NUMBER));
+    }
+
+    /* --- Collezioni --- */
+    Object isEmpty(JPQLNode node) {
+        return evalNot(node.not, factory.isEmpty(getValue(onlyChild(node))));
+    }
+}

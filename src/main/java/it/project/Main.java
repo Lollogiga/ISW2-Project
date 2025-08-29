@@ -18,6 +18,7 @@ import java.io.FileInputStream;
 import java.io.InputStream;
 import java.io.IOException;
 import java.nio.file.Paths;
+
 import java.util.Objects;
 import java.util.Properties;
 import java.util.logging.Level;
@@ -35,7 +36,7 @@ public class Main {
     private static final String N_SMELL    = "nSmell";
 
     // --------------- ENTRY POINT ---------------
-    public static void main(String[] args) {
+    public static void main(String[] args) throws IOException {
         Properties cfg = loadProperties("src/main/resources/configuration.properties");
 
         String projectName      = cfg.getProperty(KEY_PROJECT_NAME, "").trim();
