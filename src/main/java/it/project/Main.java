@@ -36,7 +36,7 @@ public class Main {
     private static final String N_SMELL    = "nSmell";
 
     // --------------- ENTRY POINT ---------------
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) {
         Properties cfg = loadProperties("src/main/resources/configuration.properties");
 
         String projectName      = cfg.getProperty(KEY_PROJECT_NAME, "").trim();
